@@ -404,6 +404,8 @@ function CatalogModule.setSelectedPhotos(params, callback)
     local catalog = LrApplication.activeCatalog()
     
     -- Use withWriteAccessDo with timeout to prevent blocking
+    -- withWriteAccessDo does not return the inner function's value: keep it here
+    local selectionResult
     local writeSuccess, writeError = ErrorUtils.safeCall(function()
         catalog:withWriteAccessDo("Set Photo Selection", function()
             local photos = {}
@@ -426,8 +428,7 @@ function CatalogModule.setSelectedPhotos(params, callback)
             -- Set selection
             catalog:setSelectedPhotos(photos[1], photos)
             
-            -- Return results for success callback
-            return {
+            selectionResult = {
                 selected = #photos,
                 notFound = #notFound > 0 and notFound or nil
             }
@@ -435,9 +436,9 @@ function CatalogModule.setSelectedPhotos(params, callback)
     end)
     
     if writeSuccess then
-        logger:info("Successfully set selection to " .. writeError.selected .. " photos")  -- writeError contains results when successful
+        logger:info("Successfully set selection to " .. tostring(selectionResult and selectionResult.selected) .. " photos")
         callback({
-            result = writeError  -- writeError is actually the success result
+            result = selectionResult or {}
         })
     else
         logger:error("Failed to set photo selection (write access): " .. tostring(writeError))
