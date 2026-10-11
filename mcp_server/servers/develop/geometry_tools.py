@@ -6,7 +6,7 @@ Crop coordinates in Lightroom's develop settings are stored in the photo's unrot
 (sensor) orientation. These tools take rectangles in the DISPLAYED orientation
 (x left->right, y top->bottom, 0..1) and convert them using the photo's orientation.
 """
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
 # Display rect (left, top, right, bottom) -> stored rect, per Lightroom orientation code
 def display_to_stored(rect: Tuple[float, float, float, float], orientation: Optional[str]) -> Tuple[float, float, float, float]:
@@ -178,6 +178,71 @@ def setup_geometry_tools(server, execute_command):
             settings["ToneCurveName2012"] = "Custom"
         result = await execute_command("applyExtraSettings", {
             "photoId": str(photo_id), "settings": settings, "historyName": f"Tone curve {channel}"})
+        return {"success": True, **result}
+
+    @server.tool
+    async def develop_list_profiles(camera: Optional[str] = None, filter: Optional[str] = None) -> Dict[str, Any]:
+        """
+        List the custom Camera Raw profiles installed on this PC (read from disk):
+        Look-type profiles (e.g. infrared colour-swap looks) with group, camera restriction,
+        uuid and base camera profile, plus camera profile files (.dcp).
+        Check this FIRST for infrared or other special photos: a custom profile usually
+        beats fighting white balance and HSL. Optional camera/filter text filters.
+        """
+        import glob, os, re
+        root = os.path.expandvars(r"%APPDATA%\Adobe\CameraRaw")
+        looks = []
+        for path in sorted(glob.glob(os.path.join(root, "Settings", "*.xmp"))):
+            text = open(path, encoding="utf-8", errors="replace").read()
+            def grab(pattern):
+                m = re.search(pattern, text, re.S)
+                return m.group(1).strip() if m else None
+            entry = {
+                "name": grab(r'crs:Name>\s*<rdf:Alt>\s*<rdf:li[^>]*>([^<]+)') or grab(r'crs:Name="([^"]+)"'),
+                "group": grab(r'crs:Group>\s*<rdf:Alt>\s*<rdf:li[^>]*>([^<]+)'),
+                "type": grab(r'crs:PresetType="([^"]+)"'),
+                "uuid": grab(r'crs:UUID="([^"]+)"'),
+                "camera": grab(r'crs:CameraModelRestriction="([^"]+)"'),
+                "base_camera_profile": grab(r'crs:CameraProfile="([^"]+)"'),
+                "file": os.path.basename(path),
+            }
+            looks.append(entry)
+        dcps = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(root, "CameraProfiles", "*.dcp")))]
+
+        def keep(entry):
+            hay = " ".join(str(v) for v in entry.values()).lower() if isinstance(entry, dict) else entry.lower()
+            if camera and isinstance(entry, dict) and entry.get("camera") and camera.lower() not in entry["camera"].lower():
+                return False
+            return not filter or filter.lower() in hay
+        return {"success": True,
+                "profiles": [e for e in looks if keep(e)],
+                "camera_profile_files": [d for d in dcps if keep(d)],
+                "note": "Apply a profile by copying CameraProfile + Look from a photo that uses it "
+                        "(develop_copy_settings), or pick it in Develop > Profile."}
+
+    @server.tool
+    async def develop_get_raw_settings(photo_id: str, keys: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Read raw develop settings of a photo (read-only), e.g. keys=["CameraProfile", "Look",
+        "Temperature", "Tint"] to see which profile and white balance the user chose.
+        Without keys, returns every non-table setting.
+        """
+        params: Dict[str, Any] = {"photoId": str(photo_id)}
+        if keys:
+            params["keys"] = keys
+        result = await execute_command("getRawSettings", params)
+        return {"success": True, **result}
+
+    @server.tool
+    async def develop_copy_settings(from_photo_id: str, to_photo_id: str, keys: List[str]) -> Dict[str, Any]:
+        """
+        Copy develop settings between photos inside Lightroom, e.g. keys=["CameraProfile",
+        "CameraProfileDigest", "Look"] to put a custom profile on another photo or virtual
+        copy, or ["Temperature", "Tint", "ToneCurvePV2012"] to reuse a look. Only the target
+        photo changes (one undoable step).
+        """
+        result = await execute_command("copySettings", {
+            "fromPhotoId": str(from_photo_id), "toPhotoId": str(to_photo_id), "keys": keys})
         return {"success": True, **result}
 
     @server.tool

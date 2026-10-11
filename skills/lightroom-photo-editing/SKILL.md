@@ -58,10 +58,26 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
 
 ## Infrared (Antho shoots IR: converted Canon PowerShot ELPH 180, DNG, ~590-720 nm)
 - Edit virtual copies, never the master; one virtual copy per look so they compare side by side.
-- White balance hits Lightroom's floor (2000 K / tint -150) and the image is still magenta:
-  the Adobe profile can't neutralise IR and there is no true channel swap in Lightroom
-  (that needs a custom DCP profile made outside Lightroom, e.g. DNG Profile Editor).
-- HSL can't separate sky from foliage (same hue band in IR). What works:
+- FIRST, before touching anything:
+  1. `develop_list_profiles(filter="infrared")`. Antho has custom IR profiles: camera profiles
+     "Infrared Temp -10 ... -100" (elph180_ir_temp_*.dcp) and Look profiles
+     "Infrared Temp(s) -XX rb swap" (red/blue channel swap), "Infrared -50/-100 Color Swap",
+     "RG_Swap", "RB_70%", "Kolari Pocket 590nm IR Channel Mixer".
+  2. Look at the user's own edit of the master: `develop_get_raw_settings(master_id,
+     ["CameraProfile", "Look", "Temperature", "Tint", "ToneCurvePV2012"])` and export it.
+     Antho's CRW_0804 master: Look "Infrared Temps -50 rb swap" at Amount 2 (200 %) on camera
+     profile "Infrared Temp -50", WB 10500 K / tint -150, Exposure +1.17, Shadows +85,
+     Whites +31, Blacks -45, Vibrance +21, curve 64->46 / 188->203, tight crop.
+     Result: peach-gold foliage, deep navy sky, dark water. That is the reference.
+  3. Build new looks on that profile: make the virtual copy FROM THE MASTER (it inherits the
+     profile and settings), or `develop_copy_settings(master, copy, ["CameraProfile",
+     "CameraProfileDigest", "Look"])`.
+- With an rb swap profile the colour controls are inverted: local/global Temperature UP makes
+  the sky bluer (down makes it dark/brown). Aerochrome on Antho's profile: WB ~9000 K / tint
+  -120, Calibration RedHue -40 / RedSaturation +50, HSL Orange hue -80 / sat +60, Yellow hue
+  -60, Red sat +25 / lum -10, then AI sky mask local temperature about +28 for a royal-blue sky.
+- Without a swap profile (fallback): white balance hits Lightroom's floor (2000 K / tint -150)
+  and the image stays magenta. HSL can't separate sky from foliage (same hue band). What works:
   - Calibration primaries: BlueHue -100 / BlueSaturation +100 -> blue sky, icy foliage
     (base for classic); RedHue -100, RedSat -50, BlueHue -100, BlueSat 50 -> magenta foliage
     (base for Aerochrome-style; push HSL Magenta hue +100 toward red).

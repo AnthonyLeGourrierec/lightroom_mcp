@@ -3784,6 +3784,59 @@ function DevelopModule.applyExtraSettings(params, callback)
     end
 end
 
+-- Read-only: raw develop settings for the given keys (e.g. CameraProfile, Look, Temperature)
+function DevelopModule.getRawSettings(params, callback)
+    ensureLrModules()
+    params = params or {}
+    local photo = getPhotoOrError(params.photoId, callback)
+    if not photo then return end
+    local ok, err = LrTasks.pcall(function()
+        local all = photo:getDevelopSettings()
+        local out = {}
+        if type(params.keys) == "table" and #params.keys > 0 then
+            for _, key in ipairs(params.keys) do out[key] = deepCopy(all[key]) end
+        else
+            for key, value in pairs(all) do
+                if type(value) ~= "table" then out[key] = value end
+            end
+        end
+        callback({ result = { settings = out } })
+    end)
+    if not ok then
+        callback({ error = { code = "READ_FAILED", message = tostring(err) } })
+    end
+end
+
+-- Copy develop keys from one photo to another, e.g. {"CameraProfile", "Look"} to reuse
+-- a custom (infrared) profile. Tables are copied inside Lightroom, so profile data such
+-- as RGB tables survive intact. One undoable step on the target photo.
+function DevelopModule.copySettings(params, callback)
+    ensureLrModules()
+    params = params or {}
+    if type(params.keys) ~= "table" or #params.keys == 0 then
+        callback({ error = { code = "MISSING_PARAM", message = "keys (list) is required" } })
+        return
+    end
+    local source = getPhotoOrError(params.fromPhotoId, callback)
+    if not source then return end
+    local target = getPhotoOrError(params.toPhotoId, callback)
+    if not target then return end
+    local ok, err = LrTasks.pcall(function()
+        local all = source:getDevelopSettings()
+        local copy = {}
+        for _, key in ipairs(params.keys) do
+            if all[key] ~= nil then copy[key] = deepCopy(all[key]) end
+        end
+        LrApplication.activeCatalog():withWriteAccessDo("Copy settings", function()
+            target:applyDevelopSettings(copy)
+        end, { timeout = 10 })
+        callback({ result = { copied = countKeys(copy) } })
+    end)
+    if not ok then
+        callback({ error = { code = "COPY_FAILED", message = tostring(err) } })
+    end
+end
+
 -- ========================================
 -- SNAPSHOTS, VIRTUAL COPIES, PRESETS
 -- ========================================
