@@ -3853,6 +3853,27 @@ function DevelopModule.createVirtualCopy(params, callback)
     end
 end
 
+-- Presets saved by this plugin are not listed by developPresetFolders(), so their
+-- name -> uuid is remembered in the plugin prefs and looked up by uuid.
+local PLUGIN_PRESET_FOLDER = "Claude (plugin presets)"
+
+local function pluginPresets()
+    local prefs = import('LrPrefs').prefsForPlugin()
+    local out = {}
+    for name, uuid in pairs(prefs.savedPresets or {}) do
+        local preset = LrApplication.developPresetByUuid(uuid)
+        if preset then out[name] = preset end
+    end
+    return out
+end
+
+local function rememberPluginPreset(name, uuid)
+    local prefs = import('LrPrefs').prefsForPlugin()
+    local saved = deepCopy(prefs.savedPresets or {})
+    saved[name] = uuid
+    prefs.savedPresets = saved
+end
+
 local function findPreset(nameOrUuid)
     for _, folder in ipairs(LrApplication.developPresetFolders()) do
         for _, preset in ipairs(folder:getDevelopPresets()) do
@@ -3861,6 +3882,13 @@ local function findPreset(nameOrUuid)
             end
         end
     end
+    for name, preset in pairs(pluginPresets()) do
+        if name == nameOrUuid or preset:getUuid() == nameOrUuid then
+            return preset, PLUGIN_PRESET_FOLDER
+        end
+    end
+    local byUuid = LrApplication.developPresetByUuid(nameOrUuid)
+    if byUuid then return byUuid, "?" end
     return nil
 end
 
@@ -3876,6 +3904,11 @@ function DevelopModule.listPresets(params, callback)
                 if not filter or string.find(string.lower(name .. " " .. folder:getName()), filter, 1, true) then
                     table.insert(out, { name = name, folder = folder:getName(), uuid = preset:getUuid() })
                 end
+            end
+        end
+        for name, preset in pairs(pluginPresets()) do
+            if not filter or string.find(string.lower(name .. " " .. PLUGIN_PRESET_FOLDER), filter, 1, true) then
+                table.insert(out, { name = name, folder = PLUGIN_PRESET_FOLDER, uuid = preset:getUuid() })
             end
         end
         callback({ result = { presets = out, count = #out } })
@@ -3935,6 +3968,7 @@ function DevelopModule.savePreset(params, callback)
             if not excluded then settings[key] = deepCopy(value) end
         end
         local preset = LrApplication.addDevelopPresetForPlugin(_PLUGIN, params.name, settings)
+        if preset then rememberPluginPreset(params.name, preset:getUuid()) end
         callback({ result = { saved = params.name, uuid = preset and preset:getUuid() or nil, settingCount = countKeys(settings) } })
     end)
     if not ok then
