@@ -83,8 +83,16 @@ def setup_geometry_tools(server, execute_command):
             "CropRight": round(s_right, 6), "CropBottom": round(s_bottom, 6),
             "CropAngle": angle, "HasCrop": True,
         }
-        result = await execute_command("applyExtraSettings", {
-            "photoId": str(photo_id), "settings": settings, "historyName": "Crop"})
+        selected = await execute_command("catalog.getSelectedPhotos")
+        if [str(p.get("id")) for p in selected.get("photos", [])] == [str(photo_id)]:
+            # The photo is open in Develop: raw crop settings would be overwritten by the
+            # Develop controller's own state, so set the crop through the controller.
+            for key in ("CropLeft", "CropTop", "CropRight", "CropBottom", "CropAngle"):
+                await execute_command("setValue", {"param": key, "value": settings[key]})
+            result = {"applied": 5, "via": "develop controller"}
+        else:
+            result = await execute_command("applyExtraSettings", {
+                "photoId": str(photo_id), "settings": settings, "historyName": "Crop"})
         return {"success": True, "displayed_rect": rect, "orientation": orientation, "stored": settings, **result}
 
     @server.tool

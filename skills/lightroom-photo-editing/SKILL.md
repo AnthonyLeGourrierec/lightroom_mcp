@@ -56,7 +56,26 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
 6. Export, look (also at 100% crops for noise, halos, edges), refine, repeat.
 7. Snapshot the final, export the final only, explain the edit in plain words.
 
+## Infrared (Antho shoots IR: converted Canon PowerShot ELPH 180, DNG, ~590-720 nm)
+- Edit virtual copies, never the master; one virtual copy per look so they compare side by side.
+- White balance hits Lightroom's floor (2000 K / tint -150) and the image is still magenta:
+  the Adobe profile can't neutralise IR and there is no true channel swap in Lightroom
+  (that needs a custom DCP profile made outside Lightroom, e.g. DNG Profile Editor).
+- HSL can't separate sky from foliage (same hue band in IR). What works:
+  - Calibration primaries: BlueHue -100 / BlueSaturation +100 -> blue sky, icy foliage
+    (base for classic); RedHue -100, RedSat -50, BlueHue -100, BlueSat 50 -> magenta foliage
+    (base for Aerochrome-style; push HSL Magenta hue +100 toward red).
+  - AI sky mask with local hue -45..-90 plus temperature/tint toward blue to turn the sky blue.
+  - Classic white foliage: global Saturation about -55 after the calibration, warm the
+    highlights slightly (split toning ~48 / 20) for cream instead of icy blue.
+  - B&W IR: Saturation -100, strong S-curve, sky mask exposure -0.7 (Wood effect), grain ~25;
+    watch crushed blacks (keep < ~3 %).
+- These DNGs have a dark border: crop ~2-2.5 % per side.
+- Low ISO: no denoise needed; add grain instead.
+
 ## Gotchas learned the hard way
+- On the photo open in Develop, settings written directly (crop, Upright) can be overwritten
+  by the Develop controller; set them through the controller (the crop/Upright tools do).
 - Coordinates: tools take displayed coordinates (0..1, x right, y down). Lightroom stores
   mask and crop geometry in sensor orientation; the tools convert using the photo's
   orientation ("AB" none, "BC" 90 CW, "DA" 90 CCW, "CD" 180). Don't bypass this.

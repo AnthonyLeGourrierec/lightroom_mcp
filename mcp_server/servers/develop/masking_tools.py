@@ -35,7 +35,7 @@ AI_LOCAL_NAMES = {
     "shadows": "local_Shadows", "whites": "local_Whites", "blacks": "local_Blacks",
     "clarity": "local_Clarity", "texture": "local_Texture", "dehaze": "local_Dehaze",
     "saturation": "local_Saturation", "temperature": "local_Temperature", "tint": "local_Tint",
-    "sharpness": "local_Sharpness", "noise": "local_LuminanceNoise",
+    "sharpness": "local_Sharpness", "noise": "local_LuminanceNoise", "hue": "local_Hue",
 }
 
 
@@ -261,10 +261,12 @@ def setup_masking_tools(server, execute_command):
         whites: Optional[float] = None, blacks: Optional[float] = None,
         clarity: Optional[float] = None, texture: Optional[float] = None,
         dehaze: Optional[float] = None, saturation: Optional[float] = None,
-        temperature: Optional[float] = None, tint: Optional[float] = None
+        temperature: Optional[float] = None, tint: Optional[float] = None,
+        hue: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Create an AI mask on the photo open in Develop and apply local adjustments.
+        hue rotates colours inside the mask (e.g. -45 turns an infrared purple sky blue).
 
         mask_type: "sky", "subject", "background", "people", "objects", "landscape".
         The plugin waits (up to ~20 s) until Lightroom has computed the mask and
@@ -277,7 +279,7 @@ def setup_masking_tools(server, execute_command):
         adjustments = _adjustments(
             exposure=exposure, contrast=contrast, highlights=highlights, shadows=shadows, whites=whites,
             blacks=blacks, clarity=clarity, texture=texture, dehaze=dehaze, saturation=saturation,
-            temperature=temperature, tint=tint)
+            temperature=temperature, tint=tint, hue=hue)
         local_settings = {AI_LOCAL_NAMES[k]: v for k, v in adjustments.items()}
         result = await execute_command("createMaskWithLocalAdjustments", {
             "maskType": "aiSelection", "maskSubtype": mask_type, "localSettings": local_settings})
