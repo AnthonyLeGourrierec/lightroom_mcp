@@ -3,9 +3,12 @@ Masking tools for develop server: AI masks, linear/radial gradients, Enhance (AI
 
 Gradients are written directly into the photo's MaskGroupBasedCorrections develop
 setting (Lightroom's SDK cannot place gradient geometry through LrDevelopController).
-Coordinates are normalized 0..1 of the image as displayed (x left->right, y top->bottom).
+Tools take coordinates normalized 0..1 of the image as displayed (x left->right,
+y top->bottom). Lightroom stores mask geometry in the photo's unrotated (sensor)
+orientation, so points are converted with the photo's orientation code.
 """
 import math
+import uuid
 from typing import Dict, Any, Optional, List
 
 # UI slider name -> (Lightroom correction key, divisor from UI units to stored units)
@@ -36,15 +39,48 @@ AI_LOCAL_NAMES = {
 }
 
 
+# Every local key Lightroom writes for a correction, so new entries look like its own
+NEUTRAL_LOCALS = {key: 0 for key in [
+    "LocalExposure", "LocalExposure2012", "LocalContrast", "LocalContrast2012", "LocalHighlights2012",
+    "LocalShadows2012", "LocalWhites2012", "LocalBlacks2012", "LocalClarity", "LocalClarity2012",
+    "LocalTexture", "LocalDehaze", "LocalSaturation", "LocalTemperature", "LocalTint", "LocalHue",
+    "LocalSharpness", "LocalLuminanceNoise", "LocalMoire", "LocalDefringe", "LocalGrain",
+    "LocalBrightness", "LocalToningHue", "LocalToningSaturation"]}
+
+
+def display_point_to_stored(x: float, y: float, orientation: Optional[str]) -> List[float]:
+    """Displayed (x, y) -> Lightroom's stored (unrotated) coordinates."""
+    if orientation in (None, "", "AB"):
+        return [x, y]
+    if orientation == "BC":          # displayed rotated 90 deg clockwise
+        return [y, 1 - x]
+    if orientation == "DA":          # displayed rotated 90 deg counter-clockwise
+        return [1 - y, x]
+    if orientation == "CD":          # 180 deg
+        return [1 - x, 1 - y]
+    raise ValueError(f"Unsupported orientation '{orientation}' (mirrored images are not handled)")
+
+
+def display_rect_to_stored(left: float, top: float, right: float, bottom: float,
+                           orientation: Optional[str]) -> List[float]:
+    """Displayed rect -> stored (left, top, right, bottom)."""
+    (x0, y0), (x1, y1) = (display_point_to_stored(left, top, orientation),
+                          display_point_to_stored(right, bottom, orientation))
+    return [min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)]
+
+
 def build_correction(name: str, mask: Dict[str, Any], adjustments: Dict[str, float]) -> Dict[str, Any]:
     """Build one MaskGroupBasedCorrections entry from UI-unit adjustments."""
-    correction: Dict[str, Any] = {
+    correction: Dict[str, Any] = dict(NEUTRAL_LOCALS)
+    correction.update({
         "What": "Correction",
         "CorrectionName": name,
+        "CorrectionID": str(uuid.uuid4()).upper(),
         "CorrectionActive": True,
         "CorrectionAmount": 1,
+        "LocalCurveRefineSaturation": 100,
         "CorrectionMasks": [mask],
-    }
+    })
     for key, value in adjustments.items():
         if value is None:
             continue
@@ -55,37 +91,37 @@ def build_correction(name: str, mask: Dict[str, Any], adjustments: Dict[str, flo
     return correction
 
 
-def linear_gradient_mask(start_x: float, start_y: float, end_x: float, end_y: float) -> Dict[str, Any]:
-    """Full effect at start, fading to none at end."""
-    return {
-        "What": "Mask/Gradient",
-        "MaskActive": True,
-        "MaskName": "Linear Gradient",
-        "MaskBlendMode": 0,
-        "MaskInverted": False,
-        "MaskValue": 1,
-        "FullX": start_x, "FullY": start_y,
-        "ZeroX": end_x, "ZeroY": end_y,
-    }
+def _mask_base(what: str, name: str) -> Dict[str, Any]:
+    return {"What": what, "MaskActive": True, "MaskName": name, "MaskBlendMode": 0,
+            "MaskInverted": False, "MaskValue": 1, "MaskVersion": 1, "MaskID": str(uuid.uuid4()).upper()}
+
+
+def linear_gradient_mask(start_x: float, start_y: float, end_x: float, end_y: float,
+                         orientation: Optional[str] = None) -> Dict[str, Any]:
+    """Full effect at start, fading to none at end (displayed coordinates)."""
+    full_x, full_y = display_point_to_stored(start_x, start_y, orientation)
+    zero_x, zero_y = display_point_to_stored(end_x, end_y, orientation)
+    mask = _mask_base("Mask/Gradient", "Linear Gradient")
+    mask.update({"FullX": full_x, "FullY": full_y, "ZeroX": zero_x, "ZeroY": zero_y})
+    return mask
 
 
 def radial_gradient_mask(top: float, left: float, bottom: float, right: float,
-                         feather: float = 50, angle: float = 0, inverted: bool = False) -> Dict[str, Any]:
-    return {
-        "What": "Mask/CircularGradient",
-        "MaskActive": True,
-        "MaskName": "Radial Gradient",
-        "MaskBlendMode": 0,
+                         feather: float = 50, angle: float = 0, inverted: bool = False,
+                         orientation: Optional[str] = None) -> Dict[str, Any]:
+    s_left, s_top, s_right, s_bottom = display_rect_to_stored(left, top, right, bottom, orientation)
+    mask = _mask_base("Mask/CircularGradient", "Radial Gradient")
+    mask.update({
         "MaskInverted": inverted,
-        "MaskValue": 1,
-        "Top": top, "Left": left, "Bottom": bottom, "Right": right,
+        "Top": s_top, "Left": s_left, "Bottom": s_bottom, "Right": s_right,
         "Angle": angle, "Midpoint": 50, "Roundness": 0,
         "Feather": feather, "Flipped": False, "Version": 2,
-    }
+    })
+    return mask
 
 
 def brush_mask(points: List[List[float]], radius: float, feather: float = 50, flow: float = 100,
-               erase: bool = False) -> Dict[str, Any]:
+               erase: bool = False, orientation: Optional[str] = None) -> Dict[str, Any]:
     """
     A brush stroke through the given points (normalized 0..1, displayed orientation).
     Dabs are interpolated so consecutive dabs overlap (spacing = radius / 3).
@@ -99,18 +135,16 @@ def brush_mask(points: List[List[float]], radius: float, feather: float = 50, fl
         for i in range(1, steps + 1):
             t = i / steps
             dabs.append([x0 + (x1 - x0) * t, y0 + (y1 - y0) * t])
-    return {
-        "What": "Mask/Paint",
-        "MaskActive": True,
-        "MaskName": "Brush",
+    stored = [display_point_to_stored(x, y, orientation) for x, y in dabs]
+    mask = _mask_base("Mask/Paint", "Brush")
+    mask.update({
         "MaskBlendMode": 1 if erase else 0,
-        "MaskInverted": False,
-        "MaskValue": 1,
         "Radius": radius,
         "Flow": flow / 100.0,
         "CenterWeight": 1 - feather / 100.0,
-        "Dabs": [f"d {x:.6f} {y:.6f}" for x, y in dabs],
-    }
+        "Dabs": [f"d {x:.6f} {y:.6f}" for x, y in stored],
+    })
+    return mask
 
 
 def _adjustments(**kwargs) -> Dict[str, float]:
@@ -119,6 +153,10 @@ def _adjustments(**kwargs) -> Dict[str, float]:
 
 def setup_masking_tools(server, execute_command):
     """Setup masking tools"""
+
+    async def orientation_of(photo_id: str) -> Optional[str]:
+        geometry = await execute_command("getPhotoGeometry", {"photoId": str(photo_id)})
+        return geometry.get("orientation")
 
     @server.tool
     async def develop_get_masks(photo_id: str) -> Dict[str, Any]:
@@ -151,7 +189,7 @@ def setup_masking_tools(server, execute_command):
         Adjustments use slider units: exposure in EV (-4..4), the others -100..100.
         Use a unique name: it is how develop_remove_mask finds it again.
         """
-        correction = build_correction(name, linear_gradient_mask(start_x, start_y, end_x, end_y), _adjustments(
+        correction = build_correction(name, linear_gradient_mask(start_x, start_y, end_x, end_y, await orientation_of(photo_id)), _adjustments(
             exposure=exposure, contrast=contrast, highlights=highlights, shadows=shadows, whites=whites,
             blacks=blacks, clarity=clarity, texture=texture, dehaze=dehaze, saturation=saturation,
             temperature=temperature, tint=tint))
@@ -177,7 +215,7 @@ def setup_masking_tools(server, execute_command):
         inside the ellipse, or outside it when inverted=True (classic custom vignette).
         Feather 0-100 controls the softness of the edge.
         """
-        correction = build_correction(name, radial_gradient_mask(top, left, bottom, right, feather, 0, inverted), _adjustments(
+        correction = build_correction(name, radial_gradient_mask(top, left, bottom, right, feather, 0, inverted, await orientation_of(photo_id)), _adjustments(
             exposure=exposure, contrast=contrast, highlights=highlights, shadows=shadows, whites=whites,
             blacks=blacks, clarity=clarity, texture=texture, dehaze=dehaze, saturation=saturation,
             temperature=temperature, tint=tint))
@@ -202,7 +240,7 @@ def setup_masking_tools(server, execute_command):
         radius: brush radius as a fraction of the image (0.03 = 3%). feather/flow 0-100.
         Typical dodge: exposure=+0.3; burn: exposure=-0.3.
         """
-        correction = build_correction(name, brush_mask(points, radius, feather, flow), _adjustments(
+        correction = build_correction(name, brush_mask(points, radius, feather, flow, orientation=await orientation_of(photo_id)), _adjustments(
             exposure=exposure, contrast=contrast, highlights=highlights, shadows=shadows, whites=whites,
             blacks=blacks, clarity=clarity, texture=texture, dehaze=dehaze, saturation=saturation,
             temperature=temperature, tint=tint))
