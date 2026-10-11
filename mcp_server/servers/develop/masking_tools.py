@@ -269,6 +269,10 @@ def setup_masking_tools(server, execute_command):
         mask_type: "sky", "subject", "background", "people", "objects", "landscape".
         The plugin waits (up to ~20 s) until Lightroom has computed the mask and
         accepted every value. Slider units: exposure in EV, others -100..100.
+        
+        Create AI masks BEFORE adding gradients/radials/brushes: when an AI mask
+        finishes computing, Lightroom commits its own copy of the mask list, which
+        drops corrections added in the meantime. Check with develop_get_masks.
         """
         adjustments = _adjustments(
             exposure=exposure, contrast=contrast, highlights=highlights, shadows=shadows, whites=whites,

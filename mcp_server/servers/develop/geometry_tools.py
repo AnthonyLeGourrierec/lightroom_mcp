@@ -99,16 +99,20 @@ def setup_geometry_tools(server, execute_command):
     async def develop_set_upright(photo_id: str, mode: str = "auto") -> Dict[str, Any]:
         """
         Upright perspective correction: mode "off", "auto", "level", "vertical" or "full".
-        Turns the lens profile on as well (Upright works best with it).
+        The photo must be the one open in Develop: Lightroom only computes the Upright
+        transform when it is set through the Develop controller (writing the setting
+        directly is ignored). Turns the lens profile on as well.
         """
         modes = {"off": 0, "auto": 1, "level": 2, "vertical": 3, "full": 4}
         if mode not in modes:
             raise ValueError(f"mode must be one of {', '.join(modes)}")
-        settings = {"PerspectiveUpright": modes[mode]}
+        selected = await execute_command("catalog.getSelectedPhotos")
+        ids = [str(p.get("id")) for p in selected.get("photos", [])]
+        if ids != [str(photo_id)]:
+            raise ValueError(f"Select only photo {photo_id} in Develop first (selected: {ids})")
         if mode != "off":
-            settings["LensProfileEnable"] = 1
-        result = await execute_command("applyExtraSettings", {
-            "photoId": str(photo_id), "settings": settings, "historyName": f"Upright {mode}"})
+            await execute_command("setValue", {"param": "LensProfileEnable", "value": 1})
+        result = await execute_command("setValue", {"param": "PerspectiveUpright", "value": modes[mode]})
         return {"success": True, "mode": mode, **result}
 
     @server.tool
