@@ -314,6 +314,11 @@ local function registerApiCommands()
     router:register("develop.applyLocalSettings", DevelopModule.applyLocalSettings, "sync")
     router:register("develop.getAvailableLocalParameters", DevelopModule.getAvailableLocalParameters, "sync")
     router:register("develop.createMaskWithLocalAdjustments", DevelopModule.createMaskWithLocalAdjustments, "sync")
+    router:register("develop.getMaskCorrections", DevelopModule.getMaskCorrections, "sync")
+    router:register("develop.addMaskCorrection", DevelopModule.addMaskCorrection, "sync")
+    router:register("develop.removeMaskCorrection", DevelopModule.removeMaskCorrection, "sync")
+    router:register("develop.getEnhanceState", DevelopModule.getEnhanceState, "sync")
+    router:register("develop.setEnhance", DevelopModule.setEnhance, "sync")
     
     -- Reverse engineering / introspection functions
     router:register("develop.dumpLrDevelopController", DevelopModule.dumpLrDevelopController, "sync")

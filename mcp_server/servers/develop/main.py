@@ -14,6 +14,7 @@ from .effects_tools import setup_effects_tools
 from .lens_tools import setup_lens_corrections_tools
 from .calibration_tools import setup_calibration_tools
 from .helper_tools import setup_helper_tools
+from .masking_tools import setup_masking_tools
 
 class DevelopServer(LightroomServerModule):
     """Photo development and editing tools - modular architecture"""
@@ -56,6 +57,9 @@ class DevelopServer(LightroomServerModule):
         
         # High-level helpers (2 tools)
         setup_helper_tools(self.server, self.execute_command)
+
+        # Masking: AI masks, linear/radial gradients, Enhance
+        setup_masking_tools(self.server, self.execute_command)
 
 # Create server instance
 develop_server = DevelopServer()

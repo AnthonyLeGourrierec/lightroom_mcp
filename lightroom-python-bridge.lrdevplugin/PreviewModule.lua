@@ -586,6 +586,9 @@ function PreviewModule.exportJpeg(params, callback)
                 settings.LR_tokenCustomString = fileName
             end
 
+            -- Give a develop edit made just before this call time to be committed,
+            -- otherwise the render can still use the previous settings
+            LrTasks.sleep(tonumber(params.settleSeconds) or 1.5)
             local session = LrExportSession({ photosToExport = { photo }, exportSettings = settings })
             local exportedPath, failure
             for _, rendition in session:renditions() do

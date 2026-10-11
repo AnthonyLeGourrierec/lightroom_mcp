@@ -28,6 +28,13 @@ end
 local ErrorUtils = getErrorUtils()
 
 -- Lazy load Lightroom modules
+-- Number of entries in a key/value table (# only counts array entries)
+local function countKeys(t)
+    local n = 0
+    for _ in pairs(t or {}) do n = n + 1 end
+    return n
+end
+
 local function ensureLrModules()
     if not LrDevelopController then
         LrDevelopController = import 'LrDevelopController'
@@ -3107,8 +3114,8 @@ function DevelopModule.applyLocalSettings(params, callback)
             appliedSettings = appliedSettings,
             errors = next(errors) and errors or nil,
             maskId = maskId,
-            settingCount = #appliedSettings,
-            message = "Applied " .. #appliedSettings .. " local settings"
+            settingCount = countKeys(appliedSettings),
+            message = "Applied " .. countKeys(appliedSettings) .. " local settings"
         }
     end)
     
@@ -3234,19 +3241,36 @@ function DevelopModule.createMaskWithLocalAdjustments(params, callback)
             LrDevelopController.selectMask(maskId)
         end
         
-        -- Apply local settings to the mask
+        -- Apply local settings to the mask. AI masks (sky, subject...) take a few
+        -- seconds to compute and values set before that are silently dropped, so
+        -- re-apply until Lightroom reports every value, for up to ~20 seconds.
         local appliedSettings = {}
         local errors = {}
-        
-        for param, value in pairs(localSettings) do
-            local settingSuccess, settingError = ErrorUtils.safeCall(function()
-                LrDevelopController.setValue(param, value)
-            end)
-            
-            if settingSuccess then
-                appliedSettings[param] = value
-            else
-                errors[param] = tostring(settingError)
+        local deadline = os.time() + 20
+        repeat
+            local pending = false
+            for param, value in pairs(localSettings) do
+                local settingSuccess, settingError = ErrorUtils.safeCall(function()
+                    LrDevelopController.setValue(param, value)
+                end)
+                if not settingSuccess then
+                    errors[param] = tostring(settingError)
+                end
+            end
+            for param, value in pairs(localSettings) do
+                local current = LrDevelopController.getValue(param)
+                if type(current) == "number" and type(value) == "number" and math.abs(current - value) < 0.001 then
+                    appliedSettings[param] = value
+                    errors[param] = nil
+                elseif not errors[param] then
+                    pending = true
+                end
+            end
+            if pending then LrTasks.sleep(0.5) end
+        until not pending or os.time() > deadline
+        for param, _ in pairs(localSettings) do
+            if appliedSettings[param] == nil and not errors[param] then
+                errors[param] = "value not accepted (mask may not be ready)"
             end
         end
         
@@ -3256,8 +3280,8 @@ function DevelopModule.createMaskWithLocalAdjustments(params, callback)
             maskSubtype = maskSubtype,
             appliedSettings = appliedSettings,
             errors = next(errors) and errors or nil,
-            settingCount = #appliedSettings,
-            message = "Created mask with " .. #appliedSettings .. " local adjustments"
+            settingCount = countKeys(appliedSettings),
+            message = "Created mask with " .. countKeys(appliedSettings) .. " local adjustments"
         }
     end)
     
@@ -3567,6 +3591,156 @@ function DevelopModule.probeAllDevelopParameters(params, callback)
             }
         })
     end
+end
+
+-- ========================================
+-- MASK DATA (gradients written directly into develop settings)
+-- ========================================
+
+local function newSyncId()
+    local hex = {}
+    for i = 1, 32 do
+        hex[i] = string.format("%X", math.random(0, 15))
+    end
+    return table.concat(hex)
+end
+
+local function deepCopy(value)
+    if type(value) ~= "table" then return value end
+    local copy = {}
+    for k, v in pairs(value) do copy[k] = deepCopy(v) end
+    return copy
+end
+
+local function getPhotoOrError(photoId, callback)
+    if not photoId then
+        callback({ error = { code = "MISSING_PHOTO_ID", message = "photoId is required" } })
+        return nil
+    end
+    local photo = LrApplication.activeCatalog():getPhotoByLocalId(tonumber(photoId))
+    if not photo then
+        callback({ error = { code = "PHOTO_NOT_FOUND", message = "Photo " .. tostring(photoId) .. " not found" } })
+    end
+    return photo
+end
+
+-- Read-only: the photo's raw mask corrections (AI masks, gradients, brushes) and crop
+function DevelopModule.getMaskCorrections(params, callback)
+    ensureLrModules()
+    params = params or {}
+    local photo = getPhotoOrError(params.photoId, callback)
+    if not photo then return end
+    local ok, err = LrTasks.pcall(function()
+        local s = photo:getDevelopSettings()
+        callback({ result = {
+            maskGroupBasedCorrections = s.MaskGroupBasedCorrections or {},
+            crop = { CropTop = s.CropTop, CropLeft = s.CropLeft, CropBottom = s.CropBottom,
+                     CropRight = s.CropRight, CropAngle = s.CropAngle, HasCrop = s.HasCrop },
+        } })
+    end)
+    if not ok then
+        callback({ error = { code = "READ_FAILED", message = tostring(err) } })
+    end
+end
+
+-- Append one correction (a table in Lightroom's MaskGroupBasedCorrections format,
+-- built by the caller) to the photo. Fills missing sync IDs. One undoable step.
+function DevelopModule.addMaskCorrection(params, callback)
+    ensureLrModules()
+    params = params or {}
+    local correction = params.correction
+    if type(correction) ~= "table" or type(correction.CorrectionMasks) ~= "table" then
+        callback({ error = { code = "INVALID_CORRECTION", message = "correction with CorrectionMasks is required" } })
+        return
+    end
+    local photo = getPhotoOrError(params.photoId, callback)
+    if not photo then return end
+
+    correction = deepCopy(correction)
+    correction.What = correction.What or "Correction"
+    correction.CorrectionSyncID = correction.CorrectionSyncID or newSyncId()
+    for _, mask in ipairs(correction.CorrectionMasks) do
+        mask.MaskSyncID = mask.MaskSyncID or newSyncId()
+    end
+
+    local ok, err = LrTasks.pcall(function()
+        local catalog = LrApplication.activeCatalog()
+        catalog:withWriteAccessDo("Add " .. tostring(correction.CorrectionName or "mask"), function()
+            local list = deepCopy(photo:getDevelopSettings().MaskGroupBasedCorrections or {})
+            table.insert(list, correction)
+            photo:applyDevelopSettings({ MaskGroupBasedCorrections = list })
+        end, { timeout = 10 })
+        local count = #(photo:getDevelopSettings().MaskGroupBasedCorrections or {})
+        callback({ result = { added = correction.CorrectionName, correctionCount = count } })
+    end)
+    if not ok then
+        callback({ error = { code = "ADD_MASK_FAILED", message = tostring(err) } })
+    end
+end
+
+-- Remove corrections whose CorrectionName equals params.name (one undoable step)
+function DevelopModule.removeMaskCorrection(params, callback)
+    ensureLrModules()
+    params = params or {}
+    if not params.name then
+        callback({ error = { code = "MISSING_PARAM", message = "name is required" } })
+        return
+    end
+    local photo = getPhotoOrError(params.photoId, callback)
+    if not photo then return end
+    local ok, err = LrTasks.pcall(function()
+        local removed = 0
+        local catalog = LrApplication.activeCatalog()
+        catalog:withWriteAccessDo("Remove " .. tostring(params.name), function()
+            local kept = {}
+            for _, c in ipairs(photo:getDevelopSettings().MaskGroupBasedCorrections or {}) do
+                if c.CorrectionName == params.name then
+                    removed = removed + 1
+                else
+                    table.insert(kept, deepCopy(c))
+                end
+            end
+            photo:applyDevelopSettings({ MaskGroupBasedCorrections = kept })
+        end, { timeout = 10 })
+        callback({ result = { removed = removed } })
+    end)
+    if not ok then
+        callback({ error = { code = "REMOVE_MASK_FAILED", message = tostring(err) } })
+    end
+end
+
+-- ========================================
+-- ENHANCE (AI Denoise / Raw Details / Super Resolution), LrC 14+
+-- ========================================
+
+function DevelopModule.getEnhanceState(params, callback)
+    ensureLrModules()
+    local ok, state = LrTasks.pcall(function() return LrDevelopController.getEnhancePanelState() end)
+    if ok then
+        callback({ result = { state = state } })
+    else
+        callback({ error = { code = "ENHANCE_UNAVAILABLE", message = tostring(state) } })
+    end
+end
+
+-- params: enhanceType (e.g. "denoise", "rawDetails", "superResolution"), enable (bool), amount (denoise 0-100)
+function DevelopModule.setEnhance(params, callback)
+    ensureLrModules()
+    params = params or {}
+    local ok, err = LrTasks.pcall(function()
+        if params.enhanceType ~= nil then
+            LrDevelopController.setEnhance(params.enhanceType, params.enable ~= false)
+        end
+        if params.amount ~= nil then
+            LrDevelopController.changeDenoiseAmount(tonumber(params.amount))
+        end
+    end)
+    if not ok then
+        callback({ error = { code = "ENHANCE_FAILED", message = tostring(err) } })
+        return
+    end
+    local _, state = LrTasks.pcall(function() return LrDevelopController.getEnhancePanelState() end)
+    callback({ result = { state = state } })
 end
 
 return DevelopModule
