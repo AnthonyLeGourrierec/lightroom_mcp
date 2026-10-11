@@ -658,6 +658,93 @@ class PreviewServer(LightroomServerModule):
             return {"success": True, "path": result.get("path"), "long_edge": long_edge}
 
         @self.server.tool
+        async def preview_export_with_crops(
+            photo_id: str,
+            out_dir: str,
+            file_name: str,
+            crops: Optional[List[Dict[str, Any]]] = None,
+            long_edge: int = 6000,
+            view_long_edge: int = 1600
+        ) -> Dict[str, Any]:
+            """
+            Export the current edit at full size, then write a downscaled view copy and
+            100% crops of chosen areas, for close inspection of noise, halos and sharpness.
+
+            crops: [{"name": "dome", "left": 0.36, "top": 0.33, "right": 0.66, "bottom": 0.52}, ...]
+            (normalized 0..1 of the displayed image). Never overwrites existing files.
+
+            Returns paths of the full export, the view copy and each crop, plus simple
+            tonal statistics (luminance percentiles, clipping) of the full image.
+            """
+            params: Dict[str, Any] = {"photoId": str(photo_id), "outDir": out_dir.replace("\\", "/"),
+                                      "fileName": file_name, "longEdge": long_edge, "quality": 95}
+            exported = await self.execute_command("exportJpeg", params)
+            full_path = Path(exported["path"])
+            image = Image.open(full_path).convert("RGB")
+
+            def unique(path: Path) -> Path:
+                candidate, n = path, 2
+                while candidate.exists():
+                    candidate = path.with_name(f"{path.stem}-{n}{path.suffix}")
+                    n += 1
+                return candidate
+
+            view = image.copy()
+            view.thumbnail((view_long_edge, view_long_edge))
+            view_path = unique(full_path.with_name(f"{full_path.stem}_view.jpg"))
+            view.save(view_path, quality=90)
+
+            crop_paths = {}
+            width, height = image.size
+            for crop in crops or []:
+                box = (int(crop["left"] * width), int(crop["top"] * height),
+                       int(crop["right"] * width), int(crop["bottom"] * height))
+                crop_path = unique(full_path.with_name(f"{full_path.stem}_crop_{crop.get('name', len(crop_paths))}.jpg"))
+                image.crop(box).save(crop_path, quality=95)
+                crop_paths[crop.get("name", str(len(crop_paths)))] = str(crop_path)
+
+            pixels = np.asarray(image, dtype=np.float32)
+            luminance = 0.2126 * pixels[..., 0] + 0.7152 * pixels[..., 1] + 0.0722 * pixels[..., 2]
+            stats = {
+                "luminance_percentiles": {str(p): round(float(np.percentile(luminance, p)), 1) for p in (1, 5, 50, 95, 99)},
+                "clipped_shadows_pct": round(float((luminance <= 2).mean() * 100), 2),
+                "clipped_highlights_pct": round(float((pixels.max(axis=-1) >= 254).mean() * 100), 2),
+                "mean_rgb": [round(float(v), 1) for v in pixels.reshape(-1, 3).mean(axis=0)],
+            }
+            return {"success": True, "full": str(full_path), "view": str(view_path),
+                    "crops": crop_paths, "stats": stats}
+
+        @self.server.tool
+        async def preview_compare(
+            image_paths: List[str], out_path: str, height: int = 1600, labels: Optional[List[str]] = None
+        ) -> Dict[str, Any]:
+            """
+            Put exported JPEGs side by side (same height) in one comparison image, e.g.
+            before / after. Never overwrites: a suffix is added if out_path exists.
+            """
+            from PIL import ImageDraw
+            images = []
+            for path in image_paths:
+                img = Image.open(path).convert("RGB")
+                images.append(img.resize((int(img.width * height / img.height), height)))
+            gap = 20
+            canvas = Image.new("RGB", (sum(i.width for i in images) + gap * (len(images) - 1), height), "white")
+            x = 0
+            draw = ImageDraw.Draw(canvas)
+            for i, img in enumerate(images):
+                canvas.paste(img, (x, 0))
+                if labels and i < len(labels):
+                    draw.rectangle((x, 0, x + 12 * len(labels[i]) + 20, 36), fill="black")
+                    draw.text((x + 10, 10), labels[i], fill="white")
+                x += img.width + gap
+            target, n = Path(out_path), 2
+            while target.exists():
+                target = Path(out_path).with_name(f"{Path(out_path).stem}-{n}{Path(out_path).suffix}")
+                n += 1
+            canvas.save(target, quality=90)
+            return {"success": True, "path": str(target)}
+
+        @self.server.tool
         async def preview_get_info(
             photo_id: Optional[str] = None
         ) -> Dict[str, Any]:

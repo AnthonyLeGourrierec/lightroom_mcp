@@ -5,7 +5,8 @@ Gradients are written directly into the photo's MaskGroupBasedCorrections develo
 setting (Lightroom's SDK cannot place gradient geometry through LrDevelopController).
 Coordinates are normalized 0..1 of the image as displayed (x left->right, y top->bottom).
 """
-from typing import Dict, Any, Optional
+import math
+from typing import Dict, Any, Optional, List
 
 # UI slider name -> (Lightroom correction key, divisor from UI units to stored units)
 LOCAL_PARAMS = {
@@ -83,6 +84,35 @@ def radial_gradient_mask(top: float, left: float, bottom: float, right: float,
     }
 
 
+def brush_mask(points: List[List[float]], radius: float, feather: float = 50, flow: float = 100,
+               erase: bool = False) -> Dict[str, Any]:
+    """
+    A brush stroke through the given points (normalized 0..1, displayed orientation).
+    Dabs are interpolated so consecutive dabs overlap (spacing = radius / 3).
+    """
+    if not points:
+        raise ValueError("points must contain at least one [x, y]")
+    spacing = max(radius / 3.0, 1e-4)
+    dabs = [points[0]]
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        steps = max(1, int(math.hypot(x1 - x0, y1 - y0) / spacing))
+        for i in range(1, steps + 1):
+            t = i / steps
+            dabs.append([x0 + (x1 - x0) * t, y0 + (y1 - y0) * t])
+    return {
+        "What": "Mask/Paint",
+        "MaskActive": True,
+        "MaskName": "Brush",
+        "MaskBlendMode": 1 if erase else 0,
+        "MaskInverted": False,
+        "MaskValue": 1,
+        "Radius": radius,
+        "Flow": flow / 100.0,
+        "CenterWeight": 1 - feather / 100.0,
+        "Dabs": [f"d {x:.6f} {y:.6f}" for x, y in dabs],
+    }
+
+
 def _adjustments(**kwargs) -> Dict[str, float]:
     return {k: v for k, v in kwargs.items() if v is not None}
 
@@ -153,6 +183,31 @@ def setup_masking_tools(server, execute_command):
             temperature=temperature, tint=tint))
         result = await execute_command("addMaskCorrection", {"photoId": str(photo_id), "correction": correction})
         return {"success": True, **result}
+
+    @server.tool
+    async def develop_add_brush_stroke(
+        photo_id: str, name: str, points: List[List[float]],
+        radius: float = 0.03, feather: float = 50, flow: float = 100,
+        exposure: Optional[float] = None, contrast: Optional[float] = None,
+        highlights: Optional[float] = None, shadows: Optional[float] = None,
+        whites: Optional[float] = None, blacks: Optional[float] = None,
+        clarity: Optional[float] = None, texture: Optional[float] = None,
+        dehaze: Optional[float] = None, saturation: Optional[float] = None,
+        temperature: Optional[float] = None, tint: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Paint a brush mask along a path, e.g. for dodge & burn (one undoable step).
+
+        points: [[x, y], ...] normalized 0..1 (displayed image), dabs are filled in between.
+        radius: brush radius as a fraction of the image (0.03 = 3%). feather/flow 0-100.
+        Typical dodge: exposure=+0.3; burn: exposure=-0.3.
+        """
+        correction = build_correction(name, brush_mask(points, radius, feather, flow), _adjustments(
+            exposure=exposure, contrast=contrast, highlights=highlights, shadows=shadows, whites=whites,
+            blacks=blacks, clarity=clarity, texture=texture, dehaze=dehaze, saturation=saturation,
+            temperature=temperature, tint=tint))
+        result = await execute_command("addMaskCorrection", {"photoId": str(photo_id), "correction": correction})
+        return {"success": True, "dabs": len(correction["CorrectionMasks"][0]["Dabs"]), **result}
 
     @server.tool
     async def develop_remove_mask(photo_id: str, name: str) -> Dict[str, Any]:

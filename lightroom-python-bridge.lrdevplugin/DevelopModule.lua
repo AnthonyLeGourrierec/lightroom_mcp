@@ -3710,6 +3710,239 @@ function DevelopModule.removeMaskCorrection(params, callback)
 end
 
 -- ========================================
+-- GEOMETRY, CROP, TRANSFORM AND OTHER SETTINGS OUTSIDE THE MAIN ALLOWLIST
+-- ========================================
+
+-- Read-only: sizes, orientation and current crop, needed to compute crops
+function DevelopModule.getPhotoGeometry(params, callback)
+    ensureLrModules()
+    params = params or {}
+    local photo = getPhotoOrError(params.photoId, callback)
+    if not photo then return end
+    local ok, err = LrTasks.pcall(function()
+        local s = photo:getDevelopSettings()
+        callback({ result = {
+            dimensions = photo:getRawMetadata("dimensions"),
+            croppedDimensions = photo:getRawMetadata("croppedDimensions"),
+            orientation = photo:getRawMetadata("orientation"),
+            crop = { CropTop = s.CropTop, CropLeft = s.CropLeft, CropBottom = s.CropBottom,
+                     CropRight = s.CropRight, CropAngle = s.CropAngle, HasCrop = s.HasCrop },
+            upright = { PerspectiveUpright = s.PerspectiveUpright, PerspectiveVertical = s.PerspectiveVertical,
+                        PerspectiveHorizontal = s.PerspectiveHorizontal, PerspectiveRotate = s.PerspectiveRotate },
+        } })
+    end)
+    if not ok then
+        callback({ error = { code = "READ_FAILED", message = tostring(err) } })
+    end
+end
+
+local EXTRA_SETTINGS = {
+    -- Crop / straighten
+    CropTop = true, CropLeft = true, CropBottom = true, CropRight = true, CropAngle = true,
+    HasCrop = true, CropConstrainToWarp = true,
+    -- Transform / Upright
+    PerspectiveUpright = true, PerspectiveVertical = true, PerspectiveHorizontal = true,
+    PerspectiveRotate = true, PerspectiveScale = true, PerspectiveAspect = true,
+    PerspectiveX = true, PerspectiveY = true, AutoLateralCA = true, LensProfileEnable = true,
+    -- Tone curves (per channel) and their names
+    ToneCurvePV2012 = true, ToneCurvePV2012Red = true, ToneCurvePV2012Green = true,
+    ToneCurvePV2012Blue = true, ToneCurveName2012 = true,
+    -- Color grading wheels
+    ColorGradeShadowHue = true, ColorGradeShadowSat = true, ColorGradeShadowLum = true,
+    ColorGradeMidtoneHue = true, ColorGradeMidtoneSat = true, ColorGradeMidtoneLum = true,
+    ColorGradeHighlightHue = true, ColorGradeHighlightSat = true, ColorGradeHighlightLum = true,
+    ColorGradeGlobalHue = true, ColorGradeGlobalSat = true, ColorGradeGlobalLum = true,
+    ColorGradeBlending = true, SplitToningBalance = true,
+}
+
+-- Apply settings from EXTRA_SETTINGS as one undoable step
+function DevelopModule.applyExtraSettings(params, callback)
+    ensureLrModules()
+    params = params or {}
+    if type(params.settings) ~= "table" then
+        callback({ error = { code = "INVALID_SETTINGS", message = "settings table is required" } })
+        return
+    end
+    local rejected = {}
+    for key, _ in pairs(params.settings) do
+        if not EXTRA_SETTINGS[key] then table.insert(rejected, key) end
+    end
+    if #rejected > 0 then
+        callback({ error = { code = "INVALID_SETTINGS", message = "Not allowed here: " .. table.concat(rejected, ", ") } })
+        return
+    end
+    local photo = getPhotoOrError(params.photoId, callback)
+    if not photo then return end
+    local ok, err = LrTasks.pcall(function()
+        LrApplication.activeCatalog():withWriteAccessDo(params.historyName or "Apply settings", function()
+            photo:applyDevelopSettings(deepCopy(params.settings))
+        end, { timeout = 10 })
+        callback({ result = { applied = countKeys(params.settings) } })
+    end)
+    if not ok then
+        callback({ error = { code = "APPLY_FAILED", message = tostring(err) } })
+    end
+end
+
+-- ========================================
+-- SNAPSHOTS, VIRTUAL COPIES, PRESETS
+-- ========================================
+
+function DevelopModule.createSnapshot(params, callback)
+    ensureLrModules()
+    params = params or {}
+    if not params.name then
+        callback({ error = { code = "MISSING_PARAM", message = "name is required" } })
+        return
+    end
+    local photo = getPhotoOrError(params.photoId, callback)
+    if not photo then return end
+    if type(photo.createDevelopSnapshot) ~= "function" then
+        callback({ error = { code = "UNSUPPORTED", message = "This Lightroom version has no snapshot API" } })
+        return
+    end
+    local ok, err = LrTasks.pcall(function()
+        LrApplication.activeCatalog():withWriteAccessDo("Create snapshot", function()
+            photo:createDevelopSnapshot(params.name, true)
+        end, { timeout = 10 })
+        callback({ result = { snapshot = params.name } })
+    end)
+    if not ok then
+        callback({ error = { code = "SNAPSHOT_FAILED", message = tostring(err) } })
+    end
+end
+
+function DevelopModule.listSnapshots(params, callback)
+    ensureLrModules()
+    params = params or {}
+    local photo = getPhotoOrError(params.photoId, callback)
+    if not photo then return end
+    local ok, err = LrTasks.pcall(function()
+        local names = {}
+        if type(photo.getDevelopSnapshots) == "function" then
+            for _, snap in ipairs(photo:getDevelopSnapshots() or {}) do
+                table.insert(names, { name = snap.name, id = snap.snapshotID })
+            end
+        end
+        callback({ result = { snapshots = names } })
+    end)
+    if not ok then
+        callback({ error = { code = "READ_FAILED", message = tostring(err) } })
+    end
+end
+
+-- Virtual copy of one photo (selects it first, as Lightroom copies the selection)
+function DevelopModule.createVirtualCopy(params, callback)
+    ensureLrModules()
+    params = params or {}
+    local photo = getPhotoOrError(params.photoId, callback)
+    if not photo then return end
+    local ok, err = LrTasks.pcall(function()
+        local catalog = LrApplication.activeCatalog()
+        catalog:setSelectedPhotos(photo, { photo })
+        local copies
+        catalog:withWriteAccessDo("Create virtual copy", function()
+            copies = catalog:createVirtualCopies(params.name or "Claude")
+        end, { timeout = 10 })
+        local ids = {}
+        for _, copy in ipairs(copies or {}) do table.insert(ids, copy.localIdentifier) end
+        callback({ result = { virtualCopyIds = ids } })
+    end)
+    if not ok then
+        callback({ error = { code = "VIRTUAL_COPY_FAILED", message = tostring(err) } })
+    end
+end
+
+local function findPreset(nameOrUuid)
+    for _, folder in ipairs(LrApplication.developPresetFolders()) do
+        for _, preset in ipairs(folder:getDevelopPresets()) do
+            if preset:getUuid() == nameOrUuid or preset:getName() == nameOrUuid then
+                return preset, folder:getName()
+            end
+        end
+    end
+    return nil
+end
+
+function DevelopModule.listPresets(params, callback)
+    ensureLrModules()
+    params = params or {}
+    local filter = params.filter and string.lower(params.filter) or nil
+    local ok, err = LrTasks.pcall(function()
+        local out = {}
+        for _, folder in ipairs(LrApplication.developPresetFolders()) do
+            for _, preset in ipairs(folder:getDevelopPresets()) do
+                local name = preset:getName()
+                if not filter or string.find(string.lower(name .. " " .. folder:getName()), filter, 1, true) then
+                    table.insert(out, { name = name, folder = folder:getName(), uuid = preset:getUuid() })
+                end
+            end
+        end
+        callback({ result = { presets = out, count = #out } })
+    end)
+    if not ok then
+        callback({ error = { code = "READ_FAILED", message = tostring(err) } })
+    end
+end
+
+function DevelopModule.applyPreset(params, callback)
+    ensureLrModules()
+    params = params or {}
+    local photo = getPhotoOrError(params.photoId, callback)
+    if not photo then return end
+    local ok, err = LrTasks.pcall(function()
+        local preset, folderName = findPreset(params.preset)
+        if not preset then
+            callback({ error = { code = "PRESET_NOT_FOUND", message = "No preset named or with uuid " .. tostring(params.preset) } })
+            return
+        end
+        LrApplication.activeCatalog():withWriteAccessDo("Apply preset " .. preset:getName(), function()
+            photo:applyDevelopPreset(preset, _PLUGIN)
+        end, { timeout = 10 })
+        callback({ result = { applied = preset:getName(), folder = folderName } })
+    end)
+    if not ok then
+        callback({ error = { code = "APPLY_PRESET_FAILED", message = tostring(err) } })
+    end
+end
+
+-- Save a preset (in this plugin's preset folder) from the photo's current
+-- settings. By default crop, masks, spot removal and white balance are left out.
+local PRESET_EXCLUDE = {
+    CropTop = true, CropLeft = true, CropBottom = true, CropRight = true, CropAngle = true,
+    HasCrop = true, MaskGroupBasedCorrections = true, RetouchInfo = true, RetouchAreas = true,
+    GradientBasedCorrections = true, CircularGradientBasedCorrections = true, PaintBasedCorrections = true,
+    WhiteBalance = true, Temperature = true, Tint = true, Orientation = true,
+}
+
+function DevelopModule.savePreset(params, callback)
+    ensureLrModules()
+    params = params or {}
+    if not params.name then
+        callback({ error = { code = "MISSING_PARAM", message = "name is required" } })
+        return
+    end
+    local photo = getPhotoOrError(params.photoId, callback)
+    if not photo then return end
+    local ok, err = LrTasks.pcall(function()
+        local includeWB = params.includeWhiteBalance == true
+        local includeMasks = params.includeMasks == true
+        local settings = {}
+        for key, value in pairs(photo:getDevelopSettings()) do
+            local excluded = PRESET_EXCLUDE[key]
+            if includeWB and (key == "WhiteBalance" or key == "Temperature" or key == "Tint") then excluded = false end
+            if includeMasks and key == "MaskGroupBasedCorrections" then excluded = false end
+            if not excluded then settings[key] = deepCopy(value) end
+        end
+        local preset = LrApplication.addDevelopPresetForPlugin(_PLUGIN, params.name, settings)
+        callback({ result = { saved = params.name, uuid = preset and preset:getUuid() or nil, settingCount = countKeys(settings) } })
+    end)
+    if not ok then
+        callback({ error = { code = "SAVE_PRESET_FAILED", message = tostring(err) } })
+    end
+end
+
+-- ========================================
 -- ENHANCE (AI Denoise / Raw Details / Super Resolution), LrC 14+
 -- ========================================
 

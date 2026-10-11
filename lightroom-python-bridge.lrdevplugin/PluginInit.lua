@@ -319,6 +319,14 @@ local function registerApiCommands()
     router:register("develop.removeMaskCorrection", DevelopModule.removeMaskCorrection, "sync")
     router:register("develop.getEnhanceState", DevelopModule.getEnhanceState, "sync")
     router:register("develop.setEnhance", DevelopModule.setEnhance, "sync")
+    router:register("develop.getPhotoGeometry", DevelopModule.getPhotoGeometry, "sync")
+    router:register("develop.applyExtraSettings", DevelopModule.applyExtraSettings, "sync")
+    router:register("develop.createSnapshot", DevelopModule.createSnapshot, "sync")
+    router:register("develop.listSnapshots", DevelopModule.listSnapshots, "sync")
+    router:register("develop.createVirtualCopy", DevelopModule.createVirtualCopy, "sync")
+    router:register("develop.listPresets", DevelopModule.listPresets, "sync")
+    router:register("develop.applyPreset", DevelopModule.applyPreset, "sync")
+    router:register("develop.savePreset", DevelopModule.savePreset, "sync")
     
     -- Reverse engineering / introspection functions
     router:register("develop.dumpLrDevelopController", DevelopModule.dumpLrDevelopController, "sync")
@@ -423,7 +431,22 @@ end
 Logger:debug("Configuration loaded: serverHost=" .. config.serverHost .. ", pluginSendPort=" .. config.pluginSendPort .. ", pluginReceivePort=" .. config.pluginReceivePort)
 
 -- Auto-start connection if configured
-if config.autoStart then
-    Logger:info("Auto-start enabled - will connect to server when menu action is triggered")
-    -- Note: Actual connection happens in MenuActions.lua to ensure proper context
+-- The bridge listens on localhost only. Set the plugin pref autoStart = false
+-- to go back to starting it from File > Plug-in Extras > Start Python Bridge.
+if config.autoStart and _G.LightroomPythonBridge.phase3Loaded then
+    Logger:info("Auto-start enabled - starting Python Bridge shortly")
+    LrTasks.startAsyncTask(function()
+        -- Let Lightroom finish opening the catalog first
+        LrTasks.sleep(5)
+        local SimpleSocketBridge = require 'SimpleSocketBridge'
+        if SimpleSocketBridge.isRunning() then
+            Logger:info("Auto-start: bridge already running")
+            return
+        end
+        -- MenuActions.lua is the same code the menu item runs
+        local ok, err = LrTasks.pcall(function() require 'MenuActions' end)
+        if not ok then
+            Logger:error("Auto-start failed: " .. tostring(err))
+        end
+    end)
 end
