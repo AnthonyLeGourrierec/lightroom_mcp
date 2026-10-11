@@ -16,6 +16,9 @@ class SocketBridge:
         self.port_file = Path(port_file)
         self._send_writer: Optional[StreamWriter] = None
         self._receive_reader: Optional[StreamReader] = None
+        # Keep the receive connection's writer alive: on Python 3.11+ a
+        # garbage-collected StreamWriter closes its transport immediately.
+        self._receive_writer: Optional[StreamWriter] = None
         self._pending_requests: Dict[str, asyncio.Future] = {}
         self._receive_task: Optional[asyncio.Task] = None
         self._connected = False
@@ -54,7 +57,7 @@ class SocketBridge:
                 )
 
                 # Connect to Lightroom's sender (where we receive)
-                self._receive_reader, _ = await asyncio.open_connection(
+                self._receive_reader, self._receive_writer = await asyncio.open_connection(
                     self.host, sender_port
                 )
 
@@ -198,5 +201,9 @@ class SocketBridge:
         if self._send_writer:
             self._send_writer.close()
             await self._send_writer.wait_closed()
+
+        if self._receive_writer:
+            self._receive_writer.close()
+            await self._receive_writer.wait_closed()
 
         logger.info("Disconnected from Lightroom bridge")
