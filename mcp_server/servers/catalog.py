@@ -130,7 +130,84 @@ class CatalogServer(LightroomServerModule):
                 "photos": result.get("photos", []),
                 "criteria": criteria
             }
-        
+
+        @self.server.tool
+        async def catalog_query_photos(
+            date_from: Optional[str] = None,
+            date_to: Optional[str] = None,
+            folder: Optional[str] = None,
+            filename: Optional[str] = None,
+            camera: Optional[str] = None,
+            lens: Optional[str] = None,
+            keyword: Optional[str] = None,
+            min_rating: Optional[int] = None,
+            max_rating: Optional[int] = None,
+            flag: Optional[str] = None,
+            color_label: Optional[str] = None,
+            file_format: Optional[str] = None,
+            include_virtual_copies: bool = True,
+            newest_first: bool = False,
+            limit: int = 50,
+            offset: int = 0
+        ) -> Dict[str, Any]:
+            """
+            Search the WHOLE catalog (not just the current selection). Read-only.
+
+            All filters are optional and combined with AND. Text filters are
+            case-insensitive substrings.
+
+            Args:
+                date_from: Capture date on or after, "YYYY-MM-DD"
+                date_to: Capture date on or before, "YYYY-MM-DD"
+                folder: Substring of the file path, e.g. "2026-09-4_apero"
+                filename: Substring of the file name, e.g. "IMG_04"
+                camera: Substring of the camera model
+                lens: Substring of the lens name
+                keyword: Substring of the photo's keywords
+                min_rating: Minimum star rating (0-5)
+                max_rating: Maximum star rating (0-5)
+                flag: "pick", "reject" or "unflagged"
+                color_label: "red", "yellow", "green", "blue", "purple" or "none"
+                file_format: "RAW", "JPG", "DNG", "TIFF", "VIDEO", ...
+                include_virtual_copies: Include virtual copies (default True)
+                newest_first: Sort by capture time descending (default oldest first)
+                limit: Max photos returned, 1-1000 (default 50)
+                offset: Pagination offset
+
+            Returns:
+                Matching photos (id, filename, path, capture time, rating, flag,
+                label, camera, lens) plus total match count
+            """
+            params: Dict[str, Any] = {
+                "dateFrom": date_from,
+                "dateTo": date_to,
+                "folder": folder,
+                "filename": filename,
+                "camera": camera,
+                "lens": lens,
+                "keyword": keyword,
+                "minRating": min_rating,
+                "maxRating": max_rating,
+                "flag": flag,
+                "colorLabel": color_label,
+                "fileFormat": file_format,
+                "includeVirtualCopies": include_virtual_copies,
+                "sort": "-captureTime" if newest_first else "captureTime",
+                "limit": limit,
+                "offset": offset,
+            }
+            params = {k: v for k, v in params.items() if v is not None}
+            result = await self.execute_command("queryPhotos", params)
+
+            return {
+                "success": True,
+                "total": result.get("total", 0),
+                "catalog_total": result.get("catalogTotal", 0),
+                "returned": len(result.get("photos", [])),
+                "has_more": result.get("hasMore", False),
+                "photos": result.get("photos", []),
+            }
+
         @self.server.tool
         async def catalog_get_photo_metadata(
             photo_id: Union[str, int]

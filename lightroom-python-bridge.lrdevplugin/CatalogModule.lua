@@ -606,6 +606,175 @@ function CatalogModule.findPhotos(params, callback)
     end)
 end
 
+-- Parse "YYYY-MM-DD" into a Lightroom time (seconds since 2001-01-01, local time)
+local function parseDate(s, endOfDay)
+    if type(s) ~= "string" then return nil end
+    local y, m, d = s:match("^(%d%d%d%d)-(%d%d?)-(%d%d?)$")
+    if not y then return nil end
+    local LrDate = import 'LrDate'
+    if endOfDay then
+        return LrDate.timeFromComponents(tonumber(y), tonumber(m), tonumber(d), 23, 59, 59.999, "local")
+    end
+    return LrDate.timeFromComponents(tonumber(y), tonumber(m), tonumber(d), 0, 0, 0, "local")
+end
+
+local function containsCI(haystack, needle)
+    if not needle or needle == "" then return true end
+    if not haystack then return false end
+    return string.find(string.lower(tostring(haystack)), string.lower(needle), 1, true) ~= nil
+end
+
+-- Lightroom reports "grey" (or nothing) for photos without a color label
+local function labelName(label)
+    if label == nil or label == "" or label == "grey" or label == "gray" then return "none" end
+    return label
+end
+
+local FLAG_VALUES ={ pick = 1, picked = 1, reject = -1, rejected = -1, unflagged = 0, none = 0 }
+
+-- Catalog-wide, read-only photo query. All filters are optional and combined with AND:
+--   dateFrom / dateTo ("YYYY-MM-DD", capture date, inclusive), folder (path substring),
+--   filename, camera, lens, keyword (substrings, case-insensitive), minRating / maxRating (0-5),
+--   flag ("pick" | "reject" | "unflagged"), colorLabel ("red", "yellow", ..., "none"),
+--   fileFormat ("RAW", "JPG", ...), includeVirtualCopies (default true),
+--   sort ("captureTime" | "-captureTime"), limit (default 50, max 1000), offset.
+function CatalogModule.queryPhotos(params, callback)
+    ensureLrModules()
+    local logger = getLogger()
+    params = params or {}
+
+    local limit = tonumber(params.limit) or 50
+    local offset = tonumber(params.offset) or 0
+    if limit < 1 or limit > 1000 or offset < 0 then
+        callback(ErrorUtils.createError(ErrorUtils.CODES.INVALID_PARAM_VALUE or "INVALID_PARAM_VALUE",
+            "limit must be 1-1000 and offset >= 0"))
+        return
+    end
+
+    local dateFrom, dateTo
+    if params.dateFrom then
+        dateFrom = parseDate(params.dateFrom, false)
+        if not dateFrom then
+            callback(ErrorUtils.createError("INVALID_PARAM_VALUE", "dateFrom must be YYYY-MM-DD"))
+            return
+        end
+    end
+    if params.dateTo then
+        dateTo = parseDate(params.dateTo, true)
+        if not dateTo then
+            callback(ErrorUtils.createError("INVALID_PARAM_VALUE", "dateTo must be YYYY-MM-DD"))
+            return
+        end
+    end
+
+    local flagValue
+    if params.flag then
+        flagValue = FLAG_VALUES[string.lower(tostring(params.flag))]
+        if flagValue == nil then
+            callback(ErrorUtils.createError("INVALID_PARAM_VALUE", "flag must be pick, reject or unflagged"))
+            return
+        end
+    end
+
+    local minRating = tonumber(params.minRating)
+    local maxRating = tonumber(params.maxRating)
+    local colorLabel = params.colorLabel and string.lower(tostring(params.colorLabel)) or nil
+    local includeVirtual = params.includeVirtualCopies ~= false
+    -- The message decoder does not unescape strings, so compare paths with "/" separators only
+    local function normalizePath(p)
+        if not p then return nil end
+        return (tostring(p):gsub("\\+", "/"))
+    end
+    local folderNeedle = params.folder and normalizePath(params.folder) or nil
+
+    local catalog = LrApplication.activeCatalog()
+    local success, err = LrTasks.pcall(function()
+        catalog:withReadAccessDo(function()
+            local allPhotos = catalog:getAllPhotos()
+            local raw = catalog:batchGetRawMetadata(allPhotos,
+                { "path", "rating", "pickStatus", "colorNameForLabel", "dateTimeOriginal", "fileFormat", "isVirtualCopy" })
+            local needFormatted = params.camera or params.lens or params.keyword or params.filename
+            local fmt = needFormatted and catalog:batchGetFormattedMetadata(allPhotos,
+                { "fileName", "cameraModel", "lens", "keywordTags" }) or {}
+
+            local matches = {}
+            for _, photo in ipairs(allPhotos) do
+                local r = raw[photo] or {}
+                local f = fmt[photo] or {}
+                local rating = r.rating or 0
+                local label = labelName(r.colorNameForLabel)
+                local ok = true
+                if ok and not includeVirtual and r.isVirtualCopy then ok = false end
+                if ok and dateFrom and (not r.dateTimeOriginal or r.dateTimeOriginal < dateFrom) then ok = false end
+                if ok and dateTo and (not r.dateTimeOriginal or r.dateTimeOriginal > dateTo) then ok = false end
+                if ok and minRating and rating < minRating then ok = false end
+                if ok and maxRating and rating > maxRating then ok = false end
+                if ok and flagValue ~= nil and (r.pickStatus or 0) ~= flagValue then ok = false end
+                if ok and colorLabel and string.lower(label) ~= colorLabel then ok = false end
+                if ok and params.fileFormat and string.upper(tostring(r.fileFormat or "")) ~= string.upper(params.fileFormat) then ok = false end
+                if ok and folderNeedle and not containsCI(normalizePath(r.path), folderNeedle) then ok = false end
+                if ok and not containsCI(f.fileName, params.filename) then ok = false end
+                if ok and not containsCI(f.cameraModel, params.camera) then ok = false end
+                if ok and not containsCI(f.lens, params.lens) then ok = false end
+                if ok and not containsCI(f.keywordTags, params.keyword) then ok = false end
+                if ok then
+                    table.insert(matches, { photo = photo, raw = r, time = r.dateTimeOriginal or 0 })
+                end
+            end
+
+            local descending = params.sort == "-captureTime"
+            table.sort(matches, function(a, b)
+                if descending then return a.time > b.time end
+                return a.time < b.time
+            end)
+
+            local page = {}
+            local lastIndex = math.min(offset + limit, #matches)
+            local pagePhotos = {}
+            for i = offset + 1, lastIndex do
+                table.insert(pagePhotos, matches[i].photo)
+            end
+            local pageFmt = (#pagePhotos > 0) and catalog:batchGetFormattedMetadata(pagePhotos,
+                { "fileName", "folderName", "dateTimeOriginal", "cameraModel", "lens" }) or {}
+
+            for i = offset + 1, lastIndex do
+                local m = matches[i]
+                local f = pageFmt[m.photo] or {}
+                table.insert(page, {
+                    id = m.photo.localIdentifier,
+                    filename = f.fileName,
+                    folder = f.folderName,
+                    path = m.raw.path,
+                    captureTime = f.dateTimeOriginal,
+                    rating = m.raw.rating or 0,
+                    flag = (m.raw.pickStatus == 1 and "pick") or (m.raw.pickStatus == -1 and "reject") or "unflagged",
+                    colorLabel = labelName(m.raw.colorNameForLabel),
+                    camera = f.cameraModel,
+                    lens = f.lens,
+                    fileFormat = m.raw.fileFormat,
+                    isVirtualCopy = m.raw.isVirtualCopy and true or false,
+                })
+            end
+
+            logger:info("queryPhotos: " .. #matches .. " matches of " .. #allPhotos .. ", returning " .. #page)
+            callback({
+                result = {
+                    photos = page,
+                    total = #matches,
+                    catalogTotal = #allPhotos,
+                    offset = offset,
+                    limit = limit,
+                    hasMore = lastIndex < #matches,
+                }
+            })
+        end)
+    end)
+    if not success then
+        logger:error("queryPhotos failed: " .. tostring(err))
+        callback(ErrorUtils.createError("CATALOG_ACCESS_FAILED", "queryPhotos failed: " .. tostring(err)))
+    end
+end
+
 -- Get collections in catalog
 function CatalogModule.getCollections(params, callback)
     ensureLrModules()
