@@ -518,4 +518,97 @@ function PreviewModule.getPreviewChunk(params, callback)
     end
 end
 
+-- Render a photo with its CURRENT develop settings to a JPEG file using
+-- Lightroom's export pipeline. Unlike requestJpegThumbnail this always
+-- reflects fresh edits. Never overwrites: name collisions get a suffix.
+-- params: photoId (required), outDir (required), fileName (without extension),
+--         longEdge (pixels, default 2048), quality (1-100, default 90)
+function PreviewModule.exportJpeg(params, callback)
+    ensureLrModules()
+    local logger = getLogger()
+    params = params or {}
+
+    local photoId = params.photoId
+    -- The message decoder does not unescape strings: collapse doubled backslashes
+    local outDir = params.outDir and tostring(params.outDir):gsub("\\\\", "\\") or nil
+    local fileName = params.fileName and tostring(params.fileName) or nil
+    local longEdge = tonumber(params.longEdge) or 2048
+    local quality = tonumber(params.quality) or 90
+
+    if not photoId or not outDir then
+        callback({ error = { code = "MISSING_PARAM", message = "photoId and outDir are required" } })
+        return
+    end
+    if fileName and fileName:find("[\\/:%*%?\"<>|]") then
+        callback({ error = { code = "INVALID_PARAM_VALUE", message = "fileName must not contain path characters" } })
+        return
+    end
+
+    local LrExportSession = import 'LrExportSession'
+    local LrFileUtils = import 'LrFileUtils'
+
+    LrTasks.startAsyncTask(function()
+        local ok, err = LrTasks.pcall(function()
+            if not LrFileUtils.exists(outDir) then
+                LrFileUtils.createAllDirectories(outDir)
+            end
+
+            local catalog = LrApplication.activeCatalog()
+            local photo = catalog:getPhotoByLocalId(tonumber(photoId))
+            if not photo then
+                callback({ error = { code = "PHOTO_NOT_FOUND", message = "Photo with ID " .. tostring(photoId) .. " not found" } })
+                return
+            end
+
+            local settings = {
+                LR_export_destinationType = "specificFolder",
+                LR_export_destinationPathPrefix = outDir,
+                LR_export_useSubfolder = false,
+                LR_collisionHandling = "rename",
+                LR_format = "JPEG",
+                LR_jpeg_quality = math.max(1, math.min(100, quality)) / 100,
+                LR_export_colorSpace = "sRGB",
+                LR_size_doConstrain = true,
+                LR_size_resizeType = "longEdge",
+                LR_size_maxWidth = longEdge,
+                LR_size_maxHeight = longEdge,
+                LR_size_units = "pixels",
+                LR_size_doNotEnlarge = true,
+                LR_outputSharpeningOn = false,
+                LR_minimizeEmbeddedMetadata = true,
+                LR_removeLocationMetadata = true,
+                LR_reimportExportedPhoto = false,
+                LR_includeVideoFiles = false,
+            }
+            if fileName then
+                settings.LR_renamingTokensOn = true
+                settings.LR_tokens = "{{custom_token}}"
+                settings.LR_tokenCustomString = fileName
+            end
+
+            local session = LrExportSession({ photosToExport = { photo }, exportSettings = settings })
+            local exportedPath, failure
+            for _, rendition in session:renditions() do
+                local success, pathOrMessage = rendition:waitForRender()
+                if success then
+                    exportedPath = pathOrMessage
+                else
+                    failure = pathOrMessage
+                end
+            end
+
+            if exportedPath then
+                logger:info("Exported JPEG: " .. exportedPath)
+                callback({ result = { path = exportedPath, longEdge = longEdge, quality = quality } })
+            else
+                callback({ error = { code = "EXPORT_FAILED", message = "Export failed: " .. tostring(failure) } })
+            end
+        end)
+        if not ok then
+            logger:error("exportJpeg failed: " .. tostring(err))
+            callback({ error = { code = "EXPORT_FAILED", message = tostring(err) } })
+        end
+    end)
+end
+
 return PreviewModule

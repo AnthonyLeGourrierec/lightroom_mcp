@@ -621,6 +621,43 @@ class PreviewServer(LightroomServerModule):
                 }
 
         @self.server.tool
+        async def preview_export_jpeg(
+            photo_id: str,
+            out_dir: str,
+            file_name: Optional[str] = None,
+            long_edge: int = 2048,
+            quality: int = 90
+        ) -> Dict[str, Any]:
+            """
+            Render a photo with its current develop settings to a JPEG file
+            through Lightroom's export pipeline.
+
+            Use this (not preview_generate) to see the result of fresh edits:
+            Lightroom's cached thumbnails can be stale or blank right after an edit.
+            Never overwrites existing files (collisions get a numeric suffix).
+
+            Args:
+                photo_id: Photo ID to export
+                out_dir: Destination folder (created if missing)
+                file_name: File name without extension (default: original name)
+                long_edge: Long edge in pixels (default 2048)
+                quality: JPEG quality 1-100 (default 90)
+
+            Returns:
+                Path of the written JPEG
+            """
+            params: Dict[str, Any] = {
+                "photoId": str(photo_id),
+                "outDir": out_dir.replace("\\", "/"),
+                "longEdge": long_edge,
+                "quality": quality,
+            }
+            if file_name:
+                params["fileName"] = file_name
+            result = await self.execute_command("exportJpeg", params)
+            return {"success": True, "path": result.get("path"), "long_edge": long_edge}
+
+        @self.server.tool
         async def preview_get_info(
             photo_id: Optional[str] = None
         ) -> Dict[str, Any]:

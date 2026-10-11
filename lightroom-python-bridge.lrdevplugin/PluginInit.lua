@@ -342,6 +342,7 @@ local function registerApiCommands()
     router:register("preview.generateBatchPreviews", PreviewModule.generateBatchPreviews, "sync")
     router:register("preview.getPreviewInfo", PreviewModule.getPreviewInfo, "sync")
     router:register("preview.getPreviewChunk", PreviewModule.getPreviewChunk, "sync")
+    router:register("preview.exportJpeg", PreviewModule.exportJpeg, "sync")
 
     Logger:info("Phase 4: API wrapper commands registered successfully")
 end
