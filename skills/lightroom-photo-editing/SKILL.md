@@ -81,6 +81,15 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
      - Or ask Antho to pick it once in Develop > Profile, then continue.
   4. Optional: if other IR photos in the same folder are already edited, read their raw
      settings (`develop_get_raw_settings`) to match Antho's style for that series.
+- On the swap profile, WHITE BALANCE IS THE MAIN LOOK KNOB, before any HSL:
+  ~10500 K -> peach/gold foliage, navy sky; 50000 K (max) -> icy white foliage, cyan-teal
+  sky (classic false colour, Antho's CRW_0510 choice). Try both ends first, then refine.
+- Antho's CRW_0510 recipe (white/cyan): WB 50000 / tint -150, Exposure +0.83, Highlights -92
+  (keeps texture in white foliage), Shadows -58, Whites +36, Blacks -23, Clarity +14,
+  Dehaze +6, cool colour grading (midtone hue 213 sat 30, split toning shadows 209/20,
+  highlights 223), straighten -1.97 deg, crop.
+- Always check the horizon / verticals and straighten (CropAngle, develop_set_crop angle);
+  wide IR compact shots are often tilted.
 - With an rb swap profile the colour controls are inverted: local/global Temperature UP makes
   the sky bluer (down makes it dark/brown). Aerochrome on Antho's profile: WB ~9000 K / tint
   -120, Calibration RedHue -40 / RedSaturation +50, HSL Orange hue -80 / sat +60, Yellow hue
