@@ -85,6 +85,10 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
   the sky bluer (down makes it dark/brown). Aerochrome on Antho's profile: WB ~9000 K / tint
   -120, Calibration RedHue -40 / RedSaturation +50, HSL Orange hue -80 / sat +60, Yellow hue
   -60, Red sat +25 / lum -10, then AI sky mask local temperature about +28 for a royal-blue sky.
+- Goldie (gold foliage, blue sky) on the swap profile, untested starting point: keep the
+  baseline WB, HSL Orange hue +20 / sat +40, Yellow sat +30, Red hue +20, warm split toning
+  highlights (hue ~45, sat ~20); sky via AI mask with local temperature UP for blue.
+- B&W on the swap profile: baseline, then Saturation -100, sky mask exposure -0.7, grain ~25.
 - Without a swap profile (fallback): white balance hits Lightroom's floor (2000 K / tint -150)
   and the image stays magenta. HSL can't separate sky from foliage (same hue band). What works:
   - Calibration primaries: BlueHue -100 / BlueSaturation +100 -> blue sky, icy foliage
