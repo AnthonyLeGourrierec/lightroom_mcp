@@ -63,15 +63,24 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
      "Infrared Temp -10 ... -100" (elph180_ir_temp_*.dcp) and Look profiles
      "Infrared Temp(s) -XX rb swap" (red/blue channel swap), "Infrared -50/-100 Color Swap",
      "RG_Swap", "RB_70%", "Kolari Pocket 590nm IR Channel Mixer".
-  2. Look at the user's own edit of the master: `develop_get_raw_settings(master_id,
-     ["CameraProfile", "Look", "Temperature", "Tint", "ToneCurvePV2012"])` and export it.
-     Antho's CRW_0804 master: Look "Infrared Temps -50 rb swap" at Amount 2 (200 %) on camera
-     profile "Infrared Temp -50", WB 10500 K / tint -150, Exposure +1.17, Shadows +85,
-     Whites +31, Blacks -45, Vibrance +21, curve 64->46 / 188->203, tight crop.
-     Result: peach-gold foliage, deep navy sky, dark water. That is the reference.
-  3. Build new looks on that profile: make the virtual copy FROM THE MASTER (it inherits the
-     profile and settings), or `develop_copy_settings(master, copy, ["CameraProfile",
-     "CameraProfileDigest", "Look"])`.
+  2. Most photos will be unedited. Pick the profile that matches the camera (ELPH 180 ->
+     "Infrared Temp(s) -XX rb swap"; SX50 -> "Infrared -50/-100 Color Swap", RG_Swap, RB_70%;
+     Kolari 590nm -> its channel mixer) and start from Antho's proven baseline (his own
+     CRW_0804 edit): Look "Infrared Temps -50 rb swap" at Amount 200 % on camera profile
+     "Infrared Temp -50", WB about 10500 K / tint -150, Exposure about +1.2, Shadows +85,
+     Whites +30, Blacks -45, Vibrance +20, curve 64->46 / 188->203, crop off the DNG border.
+     Expected result: peach-gold foliage, deep navy sky, dark water. Then adjust:
+     - Pick the "Temp -XX" variant by the light: try -30 / -50 / -70 and compare exports;
+       stronger values give a bluer sky, weaker values warmer foliage.
+     - Choose the look (classic, Aerochrome, Goldie, B&W) and refine from there.
+  3. How to put a profile on a photo: it can't be set by name through the SDK.
+     - Copy it from any photo that already uses it:
+       `develop_copy_settings(source, target, ["CameraProfile", "CameraProfileDigest", "Look"])`.
+       Find one with `catalog_query_photos(camera="ELPH 180", folder="Infrared")` +
+       `develop_get_raw_settings(id, ["Look"])`.
+     - Or ask Antho to pick it once in Develop > Profile, then continue.
+  4. Optional: if other IR photos in the same folder are already edited, read their raw
+     settings (`develop_get_raw_settings`) to match Antho's style for that series.
 - With an rb swap profile the colour controls are inverted: local/global Temperature UP makes
   the sky bluer (down makes it dark/brown). Aerochrome on Antho's profile: WB ~9000 K / tint
   -120, Calibration RedHue -40 / RedSaturation +50, HSL Orange hue -80 / sat +60, Yellow hue
