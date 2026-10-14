@@ -135,6 +135,10 @@ diverse photos. Read the companion files when relevant:
 - Low ISO: no denoise needed; add grain instead.
 
 ## Gotchas learned the hard way
+- A master and ALL its virtual copies share one Snapshots list, and creating a snapshot with an
+  existing name silently replaces it. Name snapshots per copy ("A1 Base", "IMG_7822 proposal");
+  `create_snapshot` now refuses duplicates (replace=True to overwrite). For a step-by-step lesson
+  use one copy per lesson, or tell Antho which prefix to look at.
 - Read the photo's current settings before changing anything (`get_photo(include=["develop"])`,
   default keys): "never edited" photos can carry edits (import presets, old tries). On IMG_7821
   Highlights -77 / Whites -100 / Shadows +58 were already there; overwriting them with milder

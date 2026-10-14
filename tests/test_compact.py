@@ -196,3 +196,15 @@ async def test_shadow_hue_on_a_photo_that_is_not_open_is_refused(lr):
     lr.selected = ["7"]
     with pytest.raises(ValueError, match="open"):
         await compact.set_color_grading("42", shadow_hue=209)
+
+async def test_snapshot_names_must_be_unique_across_virtual_copies(lr):
+    async def cmd(command, params=None):
+        if command == "develop.listSnapshots":
+            return {"snapshots": [{"name": "1 Base"}]}
+        return await FakeLightroom.cmd(lr, command, params)
+    compact.resilient_client_manager.execute_with_retry = cmd
+    with pytest.raises(ValueError, match="share snapshots"):
+        await compact.create_snapshot("42", "1 Base")
+    await compact.create_snapshot("42", "A1 Base")
+    await compact.create_snapshot("42", "1 Base", replace=True)
+    assert [c[0] for c in lr.legacy_calls] == ["develop_create_snapshot", "develop_create_snapshot"]

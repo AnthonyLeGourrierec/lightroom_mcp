@@ -553,9 +553,19 @@ async def reset_develop(photo_id: str, parameters: Optional[List[str]] = None) -
 
 
 @compact_server.tool
-async def create_snapshot(photo_id: str, name: str) -> Dict[str, Any]:
-    """Save the current settings as a named Snapshot, e.g. "Original (before Claude)"."""
-    return await _direct("develop_create_snapshot", photo_id=str(photo_id), name=name)
+async def create_snapshot(photo_id: str, name: str, replace: bool = False) -> Dict[str, Any]:
+    """
+    Save the current settings as a named Snapshot, e.g. "Original (before Claude)".
+    A master and all its virtual copies share ONE snapshot list, so prefix names per copy
+    (e.g. "A1 Base", "B Final"). An existing name is refused unless replace=True.
+    """
+    photo_id = str(photo_id)
+    existing = await _cmd("develop.listSnapshots", {"photoId": photo_id})
+    names = [s.get("name") for s in existing.get("snapshots") or []]
+    if name in names and not replace:
+        raise ValueError(f'Snapshot "{name}" already exists on this photo or one of its virtual copies '
+                         f"(they share snapshots). Use a unique name, or replace=True to overwrite it.")
+    return await _direct("develop_create_snapshot", photo_id=photo_id, name=name)
 
 
 @compact_server.tool

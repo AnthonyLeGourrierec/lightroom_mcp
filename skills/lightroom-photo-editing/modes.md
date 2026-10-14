@@ -16,6 +16,22 @@ Check what can actually go wrong, once, at the right moment. No ritual re-reads.
   noise or sharpening.
 - Run AI features one at a time and wait for each tool call to return before anything else.
 
+## Speed benchmark (2026-10-14, funfair set)
+Six photo proposals took ~5 minutes: read all photos' current settings in one SDK script
+(`develop.getRawSettings`, ~1 s), then per photo one `set_develop` with ~20 keys + `set_tone_curve`
++ one mask + one 1000 px export (~20-30 s), one refinement round where needed. Faster still: decide
+from the contact sheet, not from per-photo exports, which photos need a mask.
+
+## Recipe notes from real photos
+- Single-colour light on skin (red neon, teal LED): lower that colour's HSL saturation (-10..-20) and
+  shift WB slightly away from it; keep the mood, make skin read as skin.
+- Matte curves (black point lift 12-18) suit night shots; on bright dusk scenes they look washed out:
+  lift <= 6 and add Contrast +20 instead.
+- Long-exposure light trails: crush the sky to pure black (Blacks -35, S-curve), no matte, no heavy grain.
+- Shooting through glass: a radial over the face with Dehaze +15, Exposure +0.25, Clarity +8 cuts
+  the reflection haze locally.
+- Strong coloured cast from foreground bokeh: cool WB 4300-4500 K, Highlights -100, Whites -45.
+
 ## Lesson mode
 Goal: Antho sees what each step does and learns the vocabulary.
 1. Pick the photo with Antho; `create_virtual_copy` per style so the master stays untouched.
