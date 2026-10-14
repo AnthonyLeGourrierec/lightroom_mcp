@@ -7,6 +7,8 @@ Most tools delegate to the original (legacy) tool functions so their tested logi
 (coordinate conversion, mask units, export, ...) is reused unchanged. The legacy
 tools stay available with LIGHTROOM_MCP_TOOLS=legacy or =all (see main.py).
 """
+import asyncio
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -38,8 +40,53 @@ async def _legacy(name: str):
     raise RuntimeError(f"Legacy tool {name} is not available")
 
 
+# Lightroom's Develop controller commits its own state of the open photo shortly after a
+# slider change, silently reverting any direct (catalog) write made in the meantime:
+# a colour grade, curve or mask written right after set_develop would vanish. So on the
+# open photo, settings go through the controller where possible, and direct writes wait
+# until the controller has settled (measured: lost at <0.5 s, kept at 2 s).
+CONTROLLER_SETTLE_SECONDS = 2.5
+CONTROLLER_COMMANDS = {
+    "develop.setValue", "develop.applySettings", "develop.setCurvePoints", "develop.setAutoTone",
+    "develop.setAutoWhiteBalance", "develop.resetToDefault", "develop.resetAllDevelopAdjustments",
+}
+DIRECT_WRITE_COMMANDS = {"develop.applyExtraSettings"}
+_last_controller_write = 0.0
+
+
+def _mark_controller_write() -> None:
+    global _last_controller_write
+    _last_controller_write = time.monotonic()
+
+
+async def _settle() -> None:
+    """Wait until a direct write can no longer be reverted by a pending controller commit"""
+    remaining = CONTROLLER_SETTLE_SECONDS - (time.monotonic() - _last_controller_write)
+    if remaining > 0:
+        await asyncio.sleep(remaining)
+
+
 async def _cmd(command: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    return await resilient_client_manager.execute_with_retry(command, params)
+    if command in DIRECT_WRITE_COMMANDS:
+        await _settle()
+    result = await resilient_client_manager.execute_with_retry(command, params)
+    if command in CONTROLLER_COMMANDS:
+        _mark_controller_write()
+    return result
+
+
+async def _direct(tool_name: str, /, **kwargs) -> Dict[str, Any]:
+    """Run a legacy tool that writes the catalog directly (masks, snapshots, export, ...)"""
+    await _settle()
+    return await (await _legacy(tool_name))(**kwargs)
+
+
+async def _via_controller(tool_name: str, /, **kwargs) -> Dict[str, Any]:
+    """Run a legacy tool that works through the Develop controller"""
+    try:
+        return await (await _legacy(tool_name))(**kwargs)
+    finally:
+        _mark_controller_write()
 
 
 async def _selected_ids() -> List[str]:
@@ -62,8 +109,6 @@ async def _require_open(photo_id: str, what: str) -> None:
 PER_PHOTO_KEYS = {
     "PerspectiveVertical", "PerspectiveHorizontal", "PerspectiveRotate", "PerspectiveScale",
     "PerspectiveAspect", "PerspectiveX", "PerspectiveY", "AutoLateralCA", "LensProfileEnable",
-    "ToneCurvePV2012", "ToneCurvePV2012Red", "ToneCurvePV2012Green", "ToneCurvePV2012Blue",
-    "ToneCurveName2012",
     "ColorGradeShadowHue", "ColorGradeShadowSat", "ColorGradeShadowLum",
     "ColorGradeMidtoneHue", "ColorGradeMidtoneSat", "ColorGradeMidtoneLum",
     "ColorGradeHighlightHue", "ColorGradeHighlightSat", "ColorGradeHighlightLum",
@@ -175,6 +220,7 @@ async def find_photos(
 @compact_server.tool
 async def select_photo(photo_id: str) -> Dict[str, Any]:
     """Select a photo (it becomes the one open in Develop). This changes what Antho sees."""
+    await _settle()  # switching photos before Lightroom commits can lose the last edits
     return await (await _legacy("catalog_select_photo"))(photo_id=photo_id)
 
 
@@ -192,6 +238,7 @@ async def get_photo(
     develop_keys: raw setting names to read instead of the usual ~110 (e.g. ["Look", "CameraProfile"]).
     Settings use Lightroom's stored names (Exposure2012, Clarity2012, ...).
     """
+    await _settle()  # pending Develop changes are not in the catalog yet
     include = include or ["info", "develop"]
     if photo_id is None:
         ids = await _selected_ids()
@@ -268,10 +315,12 @@ async def set_develop(
     defaults = [k for k, v in settings.items() if v == "default"]
     for key in defaults:
         await _cmd("develop.resetToDefault", {"param": key, "photoId": photo_id})
-    per_photo = {k: v for k, v in settings.items() if k in PER_PHOTO_KEYS and k not in defaults}
-    individual = {k: v for k, v in settings.items() if k in INDIVIDUAL_KEYS and k not in defaults}
-    bulk = {k: v for k, v in settings.items()
-            if k not in per_photo and k not in individual and k not in defaults}
+    # Everything goes through the Develop controller (the photo is open), so nothing
+    # written here can be reverted by it. applySettings only knows some names; the
+    # rest (Temperature/Tint and the colour grading / lens keys) are set one by one.
+    individual = {k: v for k, v in settings.items()
+                  if (k in INDIVIDUAL_KEYS or k in PER_PHOTO_KEYS) and k not in defaults}
+    bulk = {k: v for k, v in settings.items() if k not in individual and k not in defaults}
 
     if bulk:
         result = await _cmd("develop.applySettings", {"photoId": photo_id, "settings": bulk})
@@ -279,9 +328,6 @@ async def set_develop(
             done["rejected"] = result["invalid"]
     for key, value in individual.items():
         await _cmd("develop.setValue", {"param": key, "value": value, "photoId": photo_id})
-    if per_photo:
-        await _cmd("develop.applyExtraSettings", {"photoId": photo_id, "settings": per_photo,
-                                                  "historyName": "Develop settings"})
     done["applied"] = {k: v for k, v in settings.items() if k not in done.get("rejected", {})}
     return done
 
@@ -299,12 +345,21 @@ async def set_tone_curve(
     [[0,0],[255,255]] resets it. Or s_curve: strength 0-100 for a symmetric S-curve
     (30 = gentle, 60 = strong).
     """
+    photo_id = str(photo_id)
     if points is None:
         if s_curve is None:
             raise ValueError("Give points or s_curve")
         k = round(max(0.0, min(100.0, s_curve)) * 0.25)
         points = [[0, 0], [64, 64 - k], [128, 128], [192, 192 + k], [255, 255]]
-    return await (await _legacy("develop_set_channel_curve"))(photo_id=str(photo_id), channel=channel, points=points)
+    keys = {"rgb": "ToneCurvePV2012", "red": "ToneCurvePV2012Red",
+            "green": "ToneCurvePV2012Green", "blue": "ToneCurvePV2012Blue"}
+    if channel not in keys:
+        raise ValueError("channel must be rgb, red, green or blue")
+    if await _selected_ids() == [photo_id]:
+        await _cmd("develop.setCurvePoints", {
+            "param": keys[channel], "points": [{"x": int(round(x)), "y": int(round(y))} for x, y in points]})
+        return {"success": True, "channel": channel, "points": points, "via": "develop controller"}
+    return await _direct("develop_set_channel_curve", photo_id=photo_id, channel=channel, points=points)
 
 
 @compact_server.tool
@@ -317,12 +372,23 @@ async def set_color_grading(
     blending: Optional[int] = None, balance: Optional[int] = None
 ) -> Dict[str, Any]:
     """Colour grading wheels: hue 0-359, sat 0-100, lum -100..100, blending 0-100, balance -100..100."""
-    fn = await _legacy("develop_set_color_grading")
-    return await fn(photo_id=str(photo_id), shadow_hue=shadow_hue, shadow_sat=shadow_sat, shadow_lum=shadow_lum,
-                    midtone_hue=midtone_hue, midtone_sat=midtone_sat, midtone_lum=midtone_lum,
-                    highlight_hue=highlight_hue, highlight_sat=highlight_sat, highlight_lum=highlight_lum,
-                    global_hue=global_hue, global_sat=global_sat, global_lum=global_lum,
-                    blending=blending, balance=balance)
+    photo_id = str(photo_id)
+    values = dict(shadow_hue=shadow_hue, shadow_sat=shadow_sat, shadow_lum=shadow_lum,
+                  midtone_hue=midtone_hue, midtone_sat=midtone_sat, midtone_lum=midtone_lum,
+                  highlight_hue=highlight_hue, highlight_sat=highlight_sat, highlight_lum=highlight_lum,
+                  global_hue=global_hue, global_sat=global_sat, global_lum=global_lum,
+                  blending=blending, balance=balance)
+    if await _selected_ids() == [photo_id]:
+        keys = {"blending": "ColorGradeBlending", "balance": "SplitToningBalance"}
+        settings = {}
+        for name, value in values.items():
+            if value is not None:
+                key = keys.get(name) or "ColorGrade" + "".join(part.capitalize() for part in name.split("_"))
+                settings[key] = value
+        for key, value in settings.items():
+            await _cmd("develop.setValue", {"param": key, "value": value, "photoId": photo_id})
+        return {"success": True, "applied": settings, "via": "develop controller"}
+    return await _direct("develop_set_color_grading", photo_id=photo_id, **values)
 
 
 @compact_server.tool
@@ -345,20 +411,40 @@ async def set_geometry(
     reset_crop: remove crop and straighten first.
     """
     photo_id = str(photo_id)
+    is_open = await _selected_ids() == [photo_id]
     done: Dict[str, Any] = {}
     if reset_crop:
-        done["reset_crop"] = await (await _legacy("develop_reset_crop"))(photo_id=photo_id)
+        if is_open:
+            for key, value in {"CropLeft": 0, "CropTop": 0, "CropRight": 1, "CropBottom": 1, "CropAngle": 0}.items():
+                await _cmd("develop.setValue", {"param": key, "value": value})
+            done["reset_crop"] = {"via": "develop controller"}
+        else:
+            done["reset_crop"] = await _direct("develop_reset_crop", photo_id=photo_id)
     if upright is not None:
-        done["upright"] = await (await _legacy("develop_set_upright"))(photo_id=photo_id, mode=upright)
+        done["upright"] = await _via_controller("develop_set_upright", photo_id=photo_id, mode=upright)
     if transform:
-        done["transform"] = await (await _legacy("develop_set_transform"))(photo_id=photo_id, **transform)
+        if is_open:
+            keys = {"vertical": "PerspectiveVertical", "horizontal": "PerspectiveHorizontal",
+                    "rotate": "PerspectiveRotate", "scale": "PerspectiveScale", "aspect": "PerspectiveAspect"}
+            unknown = [k for k in transform if k not in keys]
+            if unknown:
+                raise ValueError(f"Unknown transform key(s): {', '.join(unknown)}")
+            for name, value in transform.items():
+                await _cmd("develop.setValue", {"param": keys[name], "value": value})
+            done["transform"] = {"applied": transform, "via": "develop controller"}
+        else:
+            done["transform"] = await _direct("develop_set_transform", photo_id=photo_id, **transform)
     if crop:
         if angle is None:
             geometry = await _cmd("develop.getPhotoGeometry", {"photoId": photo_id})
             angle = (geometry.get("crop") or {}).get("CropAngle") or 0.0
-        done["crop"] = await (await _legacy("develop_set_crop"))(photo_id=photo_id, angle=angle, **crop)
+        # The legacy crop tool itself uses the controller on the open photo, else a direct write
+        if is_open:
+            done["crop"] = await _via_controller("develop_set_crop", photo_id=photo_id, angle=angle, **crop)
+        else:
+            done["crop"] = await _direct("develop_set_crop", photo_id=photo_id, angle=angle, **crop)
     elif angle is not None:
-        if await _selected_ids() == [photo_id]:
+        if is_open:
             done["angle"] = await _cmd("develop.setValue", {"param": "CropAngle", "value": angle})
         else:
             done["angle"] = await _cmd("develop.applyExtraSettings", {
@@ -394,19 +480,35 @@ async def add_mask(
         raise ValueError(f"Unknown adjustment(s) for {kind}: {', '.join(unknown)}")
     if kind in AI_MASK_TYPES:
         await _require_open(photo_id, "AI masks")
-        return await (await _legacy("develop_create_ai_mask"))(mask_type=kind, **adjustments)
+        return await _via_controller("develop_create_ai_mask", mask_type=kind, **adjustments)
     tools = {"linear": "develop_add_linear_gradient", "radial": "develop_add_radial_gradient",
              "brush": "develop_add_brush_stroke"}
     if kind not in tools:
         raise ValueError(f"kind must be one of {', '.join(sorted(AI_MASK_TYPES))}, linear, radial, brush")
-    fn = await _legacy(tools[kind])
-    return await fn(photo_id=photo_id, name=name or f"Claude {kind}", **(area or {}), **adjustments)
+    name = name or f"Claude {kind}"
+    result = await _direct(tools[kind], photo_id=photo_id, name=name, **(area or {}), **adjustments)
+    # A mask written directly can still be dropped by Lightroom (e.g. an AI mask finishing):
+    # confirm it is there after a moment, and add it once more if it isn't.
+    await asyncio.sleep(CONTROLLER_SETTLE_SECONDS)
+    if name not in await _mask_names(photo_id):
+        result = await _direct(tools[kind], photo_id=photo_id, name=name, **(area or {}), **adjustments)
+        await asyncio.sleep(CONTROLLER_SETTLE_SECONDS)
+        result["retried"] = True
+        result["verified"] = name in await _mask_names(photo_id)
+    else:
+        result["verified"] = True
+    return result
+
+
+async def _mask_names(photo_id: str) -> List[str]:
+    masks = await _cmd("develop.getMaskCorrections", {"photoId": photo_id})
+    return [c.get("CorrectionName") for c in masks.get("maskGroupBasedCorrections") or []]
 
 
 @compact_server.tool
 async def remove_mask(photo_id: str, name: str) -> Dict[str, Any]:
     """Remove the mask(s) with this exact name (one undoable step)."""
-    return await (await _legacy("develop_remove_mask"))(photo_id=str(photo_id), name=name)
+    return await _direct("develop_remove_mask", photo_id=str(photo_id), name=name)
 
 
 @compact_server.tool
@@ -416,7 +518,7 @@ async def set_enhance(enhance_type: Optional[str] = None, enable: bool = True,
     AI Denoise / Raw Details on the photo open in Develop. enhance_type "denoise" or
     "rawDetails"; denoise_amount 0-100 (Antho likes ~20-30). Check with get_photo(include=["enhance"]).
     """
-    return await (await _legacy("develop_set_enhance"))(
+    return await _via_controller("develop_set_enhance", 
         enhance_type=enhance_type, enable=enable, denoise_amount=denoise_amount)
 
 
@@ -439,13 +541,13 @@ async def reset_develop(photo_id: str, parameters: Optional[List[str]] = None) -
 @compact_server.tool
 async def create_snapshot(photo_id: str, name: str) -> Dict[str, Any]:
     """Save the current settings as a named Snapshot, e.g. "Original (before Claude)"."""
-    return await (await _legacy("develop_create_snapshot"))(photo_id=str(photo_id), name=name)
+    return await _direct("develop_create_snapshot", photo_id=str(photo_id), name=name)
 
 
 @compact_server.tool
 async def create_virtual_copy(photo_id: str, name: str = "Claude") -> Dict[str, Any]:
     """Create a virtual copy (selects it) to try a look without touching the master."""
-    return await (await _legacy("catalog_create_virtual_copy"))(photo_id=str(photo_id), name=name)
+    return await _direct("catalog_create_virtual_copy", photo_id=str(photo_id), name=name)
 
 
 @compact_server.tool
@@ -460,7 +562,7 @@ async def copy_settings(from_photo_id: str, to_photo_id: str, keys: List[str]) -
     Copy raw develop settings between photos, e.g. keys=["CameraProfile", "CameraProfileDigest",
     "Look"] to apply a profile (profiles can't be set by name). One undoable step.
     """
-    return await (await _legacy("develop_copy_settings"))(
+    return await _direct("develop_copy_settings", 
         from_photo_id=str(from_photo_id), to_photo_id=str(to_photo_id), keys=keys)
 
 
@@ -481,9 +583,9 @@ async def presets(
     if action == "list":
         return await (await _legacy("develop_list_presets"))(filter=filter)
     if action == "apply":
-        return await (await _legacy("develop_apply_preset"))(photo_id=str(photo_id), preset=preset)
+        return await _direct("develop_apply_preset", photo_id=str(photo_id), preset=preset)
     if action == "save":
-        return await (await _legacy("develop_save_preset"))(
+        return await _direct("develop_save_preset", 
             photo_id=str(photo_id), name=name, include_white_balance=include_white_balance,
             include_masks=include_masks)
     raise ValueError('action must be "list", "apply" or "save"')
@@ -518,10 +620,10 @@ async def export_jpeg(
     plus a view copy, from a full-size export (long_edge default 6000), to inspect detail.
     """
     if crops:
-        return await (await _legacy("preview_export_with_crops"))(
+        return await _direct("preview_export_with_crops", 
             photo_id=str(photo_id), out_dir=out_dir, file_name=file_name or f"photo_{photo_id}",
             crops=crops, long_edge=long_edge or 6000)
-    result = await (await _legacy("preview_export_jpeg"))(
+    result = await _direct("preview_export_jpeg", 
         photo_id=str(photo_id), out_dir=out_dir, file_name=file_name, long_edge=long_edge or 2048,
         quality=quality)
     if result.get("path"):

@@ -13,6 +13,7 @@ class FakeLightroom:
         self.crop_angle = crop_angle
         self.commands = []
         self.legacy_calls = []
+        self.masks = []
 
     async def cmd(self, command, params=None):
         self.commands.append((command, params))
@@ -25,11 +26,15 @@ class FakeLightroom:
                                  "Missing": None}}
         if command == "develop.applySettings":
             return {"applied": len(params["settings"])}
+        if command == "develop.getMaskCorrections":
+            return {"maskGroupBasedCorrections": [{"CorrectionName": n} for n in self.masks]}
         return {}
 
     async def legacy(self, name):
         async def fn(**kwargs):
             self.legacy_calls.append((name, kwargs))
+            if name.startswith("develop_add_"):
+                self.masks.append(kwargs["name"])
             return {"success": True}
         return fn
 
@@ -40,7 +45,8 @@ class FakeLightroom:
 @pytest.fixture
 def lr(monkeypatch):
     fake = FakeLightroom()
-    monkeypatch.setattr(compact, "_cmd", fake.cmd)
+    monkeypatch.setattr(compact, "CONTROLLER_SETTLE_SECONDS", 0)
+    monkeypatch.setattr(compact.resilient_client_manager, "execute_with_retry", fake.cmd)
     monkeypatch.setattr(compact, "_legacy", fake.legacy)
     return fake
 
@@ -51,8 +57,10 @@ async def test_set_develop_routes_each_kind_of_setting(lr):
         "ColorGradeMidtoneHue": 210, "Clarity": "default"})
 
     assert lr.sent("develop.applySettings") == [{"photoId": "42", "settings": {"Exposure": 0.3, "Shadows": 20}}]
-    assert lr.sent("develop.setValue") == [{"param": "Temperature", "value": 5600, "photoId": "42"}]
-    assert lr.sent("develop.applyExtraSettings")[0]["settings"] == {"ColorGradeMidtoneHue": 210}
+    # Everything goes through the Develop controller, never a direct write it could revert
+    assert lr.sent("develop.setValue") == [{"param": "Temperature", "value": 5600, "photoId": "42"},
+                                           {"param": "ColorGradeMidtoneHue", "value": 210, "photoId": "42"}]
+    assert not lr.sent("develop.applyExtraSettings")
     assert lr.sent("develop.resetToDefault") == [{"param": "Clarity", "photoId": "42"}]
     assert set(result["applied"]) == {"Exposure", "Shadows", "Temperature", "ColorGradeMidtoneHue", "Clarity"}
 
@@ -78,11 +86,64 @@ async def test_set_develop_runs_auto_first(lr):
     assert order[:3] == ["develop.setAutoTone", "develop.setAutoWhiteBalance", "develop.applySettings"]
 
 
-async def test_s_curve_points(lr):
+async def test_s_curve_on_the_open_photo_goes_through_the_controller(lr):
     await compact.set_tone_curve("42", s_curve=40)
-    name, kwargs = lr.legacy_calls[0]
-    assert name == "develop_set_channel_curve"
-    assert kwargs["points"] == [[0, 0], [64, 54], [128, 128], [192, 202], [255, 255]]
+    sent = lr.sent("develop.setCurvePoints")[0]
+    assert sent["param"] == "ToneCurvePV2012"
+    assert [[p["x"], p["y"]] for p in sent["points"]] == [[0, 0], [64, 54], [128, 128], [192, 202], [255, 255]]
+    assert not lr.legacy_calls
+
+
+async def test_curve_on_another_photo_is_written_directly(lr):
+    lr.selected = ["7"]
+    await compact.set_tone_curve("42", channel="blue", points=[[0, 0], [255, 240]])
+    assert lr.legacy_calls[0][0] == "develop_set_channel_curve"
+
+
+async def test_color_grading_on_the_open_photo_uses_controller_names(lr):
+    await compact.set_color_grading("42", midtone_hue=213, midtone_sat=30, blending=60, balance=-10)
+    params = {p["param"]: p["value"] for p in lr.sent("develop.setValue")}
+    assert params == {"ColorGradeMidtoneHue": 213, "ColorGradeMidtoneSat": 30,
+                      "ColorGradeBlending": 60, "SplitToningBalance": -10}
+
+
+async def test_direct_write_waits_for_the_controller_to_settle(lr, monkeypatch):
+    monkeypatch.setattr(compact, "CONTROLLER_SETTLE_SECONDS", 0.3)
+    events = []
+    original = lr.legacy
+
+    async def timed_legacy(name):
+        fn = await original(name)
+
+        async def wrapper(**kwargs):
+            events.append(("direct", compact.time.monotonic()))
+            return await fn(**kwargs)
+        return wrapper
+    monkeypatch.setattr(compact, "_legacy", timed_legacy)
+
+    await compact.set_develop("42", {"Exposure": 0.2})
+    controller_done = compact._last_controller_write
+    await compact.create_snapshot("42", "after exposure")
+    assert events[0][1] - controller_done >= 0.29
+
+
+async def test_mask_is_added_again_if_lightroom_dropped_it(lr):
+    async def drop_first(**kwargs):
+        lr.legacy_calls.append(("develop_add_linear_gradient", kwargs))
+        if len(lr.legacy_calls) > 1:
+            lr.masks.append(kwargs["name"])
+        return {"success": True}
+
+    async def legacy(name):
+        return drop_first
+    lr.legacy = legacy
+    compact._legacy = legacy
+    try:
+        result = await compact.add_mask("42", "linear", {"exposure": -0.3}, area={}, name="sky")
+    finally:
+        compact._legacy = lr.__class__.legacy.__get__(lr)
+    assert result["retried"] and result["verified"]
+    assert len(lr.legacy_calls) == 2
 
 
 async def test_crop_keeps_the_current_straighten_angle(lr):
