@@ -1,6 +1,6 @@
 ---
 name: lightroom-photo-editing
-description: Edit photos in Antho's Lightroom Classic through the "lightroom" MCP server (fork of noopz/lightroom_mcp). Use when asked to edit, grade, denoise, mask, crop or straighten a photo in Lightroom, find photos in the catalog, or export an edit.
+description: Edit photos in Antho's Lightroom Classic through the "lightroom" MCP server (fork of noopz/lightroom_mcp). Use when asked to edit, grade, denoise, mask, crop or straighten a photo in Lightroom, polish a batch of photos, teach or show editing styles, match a reference look, find photos in the catalog, or export an edit.
 ---
 
 # Photo editing in Lightroom Classic via MCP
@@ -8,6 +8,14 @@ description: Edit photos in Antho's Lightroom Classic through the "lightroom" MC
 Lightroom Classic runs on this Windows PC with the "Lightroom Python Bridge" plugin
 (repo: `C:\Users\ioman\Documents\Photo Edit\lightroom-mcp`, fork github.com/AnthonyLeGourrierec/lightroom_mcp).
 The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools appear in new sessions.
+
+Antho is a hobbyist: the goals are polished photos with little effort and learning new styles on
+diverse photos. Read the companion files when relevant:
+- `modes.md`: Lesson mode, Quick polish (batch), taste log ("my style"), reference photos, and how
+  to check efficiently. Read it at the start of any lesson, batch or reference request.
+- `styles.md`: 12 named styles with recipes and target numbers, and which to show for which photo.
+- `techniques.md`: Lightroom Classic tips and tricks, the order of work, and which ones Claude can do
+  vs. which Antho does by hand.
 
 ## Tools (compact set, 20 tools)
 - Look: `status`, `find_photos` (whole catalog), `get_photo` (info, develop settings, masks,
@@ -37,7 +45,8 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
   to restart once for a batch of changes. Python-side changes need a Claude restart.
 
 ## Ground rules
-- One photo at a time. No bulk edits, never move/rename/delete originals (photos live on E:\).
+- Never move/rename/delete originals (photos live on E:\). Batches are fine (Quick polish in
+  modes.md), on virtual copies; AI features still run one at a time.
 - First step on any photo: `create_snapshot(photo_id, "Original (before Claude)")`.
   End with a named snapshot of the final. Snapshots are how Antho compares and reverts.
 - Most edits act on the photo open in Develop (= the single selected photo): `set_develop`,
@@ -55,19 +64,20 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
 - Professional, clean, natural colour: warm light vs blue hour contrast is good, neon or
   over-saturated skies are not. Use the tone curve (gentle S-curve) and masks.
 
-## Workflow
-1. Inspect: `get_photo(id, include=["info", "develop", "geometry", "masks"])`, then
-   `export_jpeg` to look at it; read its stats (percentiles, clipping) instead of guessing.
-2. Global: one `set_develop` call with white balance, Exposure, Highlights/Shadows/Whites/Blacks,
-   presence, HSL; `set_color_grading`; `set_tone_curve(s_curve=30)`; LensProfileEnable + AutoLateralCA.
-3. Detail: `set_enhance("denoise", True, 25)` for high ISO, then `set_develop` LuminanceSmoothing 0;
-   Sharpness ~40-50 with SharpenEdgeMasking ~50.
-4. Geometry: `set_geometry(upright="auto")` (photo open in Develop), crop only if it genuinely
-   improves composition (`crop={"aspect": "4:5"}` or a rectangle); `angle` to straighten.
-5. Local: AI masks FIRST (`add_mask(id, "sky", {...})`, "subject", ...), THEN linear/radial/brush
-   masks. Verify with `get_photo(include=["masks"])`.
-6. Export, look (also at 100% crops for noise, halos, edges), refine, repeat.
-7. Snapshot the final, export the final only, explain the edit in plain words.
+## Workflow (order matters, see techniques.md)
+1. Inspect: `get_photo(id, include=["info", "geometry"])`, then one `export_jpeg` (long_edge 1200)
+   to look at it; read its stats (percentiles, clipping) instead of guessing.
+2. Profile (copy or ask Antho), then AI Denoise if high ISO: `set_enhance("denoise", True, 25)`,
+   then `set_develop` LuminanceSmoothing 0. Denoise before AI masks: they are computed from it.
+3. AI masks (`add_mask(id, "sky", {...})`, "subject", ...), one at a time: while Lightroom
+   computes AI work it accepts no other edits.
+4. Global: one `set_develop` call with white balance, Exposure, Highlights/Shadows/Whites/Blacks,
+   presence, HSL, lens; `set_color_grading`; `set_tone_curve(s_curve=30)`.
+5. Gradients/radials/brushes, geometry (`set_geometry(upright="auto")`, crop only if it helps),
+   detail (Sharpness ~40-50, SharpenEdgeMasking ~50), grain, vignette.
+6. One export to look (100 % crops only for noise/sharpness), refine once or twice.
+7. Verify the fragile parts once (`get_photo(include=["masks", "geometry", "enhance"])`), snapshot
+   the final, export the final only, explain the edit in plain words.
 
 ## Infrared (Antho shoots IR: converted Canon PowerShot ELPH 180, DNG, ~590-720 nm)
 - Edit virtual copies, never the master; one virtual copy per look so they compare side by side.
@@ -78,7 +88,7 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
      "RG_Swap", "RB_70%", "Kolari Pocket 590nm IR Channel Mixer".
   2. Most photos will be unedited. Pick the profile that matches the camera (ELPH 180 ->
      "Infrared Temp(s) -XX rb swap"; SX50 -> "Infrared -50/-100 Color Swap", RG_Swap, RB_70%;
-     Kolari 590nm -> its channel mixer) and start from Antho's proven baseline (his own
+     Kolari 590nm -> its channel mixer) and start from Antho's proven baseline (their own
      CRW_0804 edit): Look "Infrared Temps -50 rb swap" at Amount 200 % on camera profile
      "Infrared Temp -50", WB about 10500 K / tint -150, Exposure about +1.2, Shadows +85,
      Whites +30, Blacks -45, Vibrance +20, curve 64->46 / 188->203, crop off the DNG border.
