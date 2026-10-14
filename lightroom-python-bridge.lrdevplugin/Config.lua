@@ -15,7 +15,10 @@ local defaults = {
     maxReconnectAttempts = 5,
 
     -- Logging
-    logLevel = "debug",
+    logLevel = "debug",         -- unused, kept for existing prefs
+    -- debug | info | warn | error. Debug logs every message in full (including
+    -- preview image data), which bloats the log; switch to it only to troubleshoot.
+    bridgeLogLevel = "info",
     logFileMaxSize = 10485760,  -- 10MB
     logFileMaxAge = 604800,     -- 1 week in seconds
 

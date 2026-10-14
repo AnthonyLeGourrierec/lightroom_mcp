@@ -33,15 +33,7 @@ class SystemServer(LightroomServerModule):
                 Connection status and response time
             """
             start_time = datetime.now()
-            try:
-                client = await resilient_client_manager.get_client()
-                result = await client.ping()
-            except Exception:
-                # Stale connection (e.g. bridge restarted): reconnect once
-                await resilient_client_manager.disconnect()
-                client = await resilient_client_manager.get_client()
-                start_time = datetime.now()
-                result = await client.ping()
+            result = await resilient_client_manager.execute_with_retry("system.ping")
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
 
             return {

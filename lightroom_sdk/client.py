@@ -13,9 +13,14 @@ logger = logging.getLogger(__name__)
 class LightroomClient:
     """Main client for interacting with Lightroom"""
 
-    def __init__(self, host: str = 'localhost'):
+    def __init__(self, host: str = '127.0.0.1'):
         self.host = host
         self._bridge = SocketBridge(host)
+
+    @property
+    def is_connected(self) -> bool:
+        """True while both sockets to the Lightroom bridge are open"""
+        return self._bridge.is_connected
 
     async def connect(self, retry_attempts: int = 5) -> None:
         """Connect to Lightroom bridge"""
@@ -55,7 +60,6 @@ class LightroomClient:
             exception_class = ERROR_CODE_MAP.get(error_code, LightroomSDKError)
             raise exception_class(error_message, code=error_code, details=error)
 
-        time.sleep(0.1)
         return lr_response.result or {}
 
     # Convenience methods for common operations

@@ -13,6 +13,10 @@ local globalSender = nil  -- Store sender socket reference
 local bothSocketsReady = false  -- Track when both sockets are connected
 local messageQueue = {}  -- Queue messages until both sockets ready
 local isRestarting = false  -- Flag to prevent multiple concurrent restarts
+-- Each start of the socket server gets a new generation. Only the newest one
+-- keeps running: older keep-alive loops exit and their sockets close, so a
+-- client reconnecting many times doesn't pile up loops and listening sockets.
+local serverGeneration = 0
 
 -- Get Phase 3 modules from global state (loaded in PluginInit.lua)
 local function getPhase3Modules()
@@ -68,10 +72,17 @@ end
 local function writePortFile(senderPort, receiverPort)
     local logger = getLogger()
     local success, err = LrTasks.pcall(function()
-        local file = io.open("/tmp/lightroom_ports.txt", "w")
+        -- Write to a temp file and rename it, so Python never reads a half-written file
+        local tmpPath = "/tmp/lightroom_ports.txt.tmp"
+        local file = io.open(tmpPath, "w")
         if file then
             file:write(string.format("%d,%d", senderPort, receiverPort))
             file:close()
+            local LrFileUtils = import 'LrFileUtils'
+            if LrFileUtils.exists("/tmp/lightroom_ports.txt") then
+                LrFileUtils.delete("/tmp/lightroom_ports.txt")
+            end
+            LrFileUtils.move(tmpPath, "/tmp/lightroom_ports.txt")
             logger:info("Port file written: send=" .. senderPort .. ", receive=" .. receiverPort)
         else
             logger:error("Failed to create port file")
@@ -112,6 +123,15 @@ local function startSocketServer()
         end
     else
         logger:error("Phase 3 modules not available - falling back to basic mode")
+    end
+
+    serverGeneration = serverGeneration + 1
+    local myGeneration = serverGeneration
+
+    -- True while this server is the current one and the bridge hasn't been stopped
+    local function isCurrent()
+        return myGeneration == serverGeneration
+            and _G.LightroomPythonBridge and _G.LightroomPythonBridge.socketServerRunning
     end
 
     -- Use the exact same pattern as Adobe's working sample
@@ -199,23 +219,19 @@ local function startSocketServer()
                 end,
 
                 onClosed = function(socket)
+                    if not isCurrent() then return end
                     logger:info("Sender socket closed - client disconnected")
-                    -- Don't restart if shutting down
-                    if _G.LightroomPythonBridge and _G.LightroomPythonBridge.socketServerRunning then
-                        restartSocketServer()
-                    else
-                        logger:info("Socket closed during shutdown - not restarting")
-                    end
+                    restartSocketServer()
                 end,
 
                 onError = function(socket, err)
-                    logger:error("Sender socket error: " .. err)
-                    -- Only reconnect if server is still supposed to be running
-                    if err == "timeout" and _G.LightroomPythonBridge and _G.LightroomPythonBridge.socketServerRunning then
-                        logger:info("Attempting sender socket reconnect")
+                    if not isCurrent() then return end
+                    if err == "timeout" then
+                        -- Normal while waiting for a client: keep listening
                         socket:reconnect()
                     else
-                        logger:info("Sender socket error during shutdown - not reconnecting")
+                        logger:error("Sender socket error: " .. tostring(err) .. " - restarting socket server")
+                        restartSocketServer()
                     end
                 end
             }
@@ -271,23 +287,19 @@ local function startSocketServer()
                 end,
 
                 onClosed = function(socket)
+                    if not isCurrent() then return end
                     logger:info("*** RECEIVER SOCKET CLOSED - CLIENT DISCONNECTED ***")
-                    -- Don't restart if shutting down
-                    if _G.LightroomPythonBridge and _G.LightroomPythonBridge.socketServerRunning then
-                        restartSocketServer()
-                    else
-                        logger:info("Receiver socket closed during shutdown - not restarting")
-                    end
+                    restartSocketServer()
                 end,
 
                 onError = function(socket, err)
-                    logger:error("*** RECEIVER SOCKET ERROR: " .. err)
-                    -- Only reconnect if server is still supposed to be running
-                    if err == "timeout" and _G.LightroomPythonBridge and _G.LightroomPythonBridge.socketServerRunning then
-                        logger:info("Receiver socket timeout - attempting reconnect")
+                    if not isCurrent() then return end
+                    if err == "timeout" then
+                        -- Normal while waiting for a client: keep listening
                         socket:reconnect()
                     else
-                        logger:info("Receiver socket error during shutdown - not reconnecting")
+                        logger:error("*** RECEIVER SOCKET ERROR: " .. tostring(err) .. " - restarting socket server")
+                        restartSocketServer()
                     end
                 end
             }
@@ -300,11 +312,13 @@ local function startSocketServer()
             -- Use exact Adobe pattern: global control variable + simple loop
             _G.LightroomPythonBridge.socketServerRunning = true
 
-            while _G.LightroomPythonBridge.socketServerRunning do
+            while isCurrent() do
                 LrTasks.sleep(0.2)  -- 200ms - faster shutdown response (was 500ms)
             end
 
-            logger:info("Socket server loop ended - cleaning up")
+            -- A restart only replaces this server; a stop shuts the bridge down
+            local replaced = _G.LightroomPythonBridge.socketServerRunning
+            logger:info("Socket server loop ended (" .. (replaced and "replaced by restart" or "shutdown") .. ") - cleaning up")
 
             -- Cleanup
             if sender then
@@ -314,16 +328,18 @@ local function startSocketServer()
                 receiver:close()
             end
 
-            -- Remove port file
-            pcall(function()
-                local LrFileUtils = import 'LrFileUtils'
-                if LrFileUtils.exists("/tmp/lightroom_ports.txt") then
-                    LrFileUtils.delete("/tmp/lightroom_ports.txt")
-                end
-            end)
+            if not replaced then
+                -- Remove port file (the replacing server has written its own)
+                pcall(function()
+                    local LrFileUtils = import 'LrFileUtils'
+                    if LrFileUtils.exists("/tmp/lightroom_ports.txt") then
+                        LrFileUtils.delete("/tmp/lightroom_ports.txt")
+                    end
+                end)
 
-            logger:info("Socket server stopped")
-            LrDialogs.showBezel("Python Bridge Disconnected", 2)
+                logger:info("Socket server stopped")
+                LrDialogs.showBezel("Python Bridge Disconnected", 2)
+            end
         end)
     end)
 end
@@ -361,8 +377,16 @@ restartSocketServer = function()
         globalSender = nil
         senderSocket = nil
 
-        -- Small delay to allow socket cleanup
-        LrTasks.sleep(2)
+        -- The old ports are dead: remove them so Python waits for the new ones
+        pcall(function()
+            local LrFileUtils = import 'LrFileUtils'
+            if LrFileUtils.exists("/tmp/lightroom_ports.txt") then
+                LrFileUtils.delete("/tmp/lightroom_ports.txt")
+            end
+        end)
+
+        -- Small delay to allow socket cleanup (new sockets get new ports anyway)
+        LrTasks.sleep(0.5)
 
         -- THIRD CHECK: Verify still running after sleep
         if not (_G.LightroomPythonBridge and _G.LightroomPythonBridge.socketServerRunning) then

@@ -9,12 +9,12 @@ local Logger = {}
 function Logger:init(pluginName)
     self.logger = LrLogger(pluginName)
     self.logger:enable("logfile")
-    self.logLevel = 'trace'  -- Default to debug for development
-    self.logger:debug("TEST")
-    local l = LrLogger("WTF")
-    l:enable("logfile")
-    l:debug("test")
+    -- Config:init() runs before this in PluginInit.lua
+    local Config = require 'Config'
+    self.logLevel = (Config.prefs and Config:get('bridgeLogLevel')) or 'info'
 end
+
+local LEVELS = { debug = 1, info = 2, warn = 3, error = 4 }
 
 -- Log level methods
 function Logger:debug(message)
@@ -43,8 +43,7 @@ end
 
 -- Helper methods
 function Logger:shouldLog(level)
-    -- local levels = { debug = 1, info = 2, warn = 3, error = 4 }
-    return true -- levels[level] >= levels[self.logLevel]
+    return (LEVELS[level] or 2) >= (LEVELS[self.logLevel] or 2)
 end
 
 function Logger:formatMessage(message)
