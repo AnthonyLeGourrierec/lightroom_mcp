@@ -6,7 +6,7 @@ description: Edit photos in Antho's Lightroom Classic through the "lightroom" MC
 # Photo editing in Lightroom Classic via MCP
 
 Lightroom Classic runs on this Windows PC with the "Lightroom Python Bridge" plugin
-(repo: `C:\Users\ioman\Downloads\lightroom-mcp`, fork github.com/AnthonyLeGourrierec/lightroom_mcp).
+(repo: `C:\Users\ioman\Documents\Photo Edit\lightroom-mcp`, fork github.com/AnthonyLeGourrierec/lightroom_mcp).
 The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools appear in new sessions.
 
 ## Before starting
@@ -29,7 +29,7 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
   photo currently open in Develop. Check `catalog_get_selected_photos` first; don't switch the
   photo Antho is looking at without saying so.
 - Export only the final (`preview_export_jpeg`, or `preview_export_with_crops` when you need
-  to inspect detail) into `C:\Users\ioman\Downloads\lightroom-demo`. Antho does not want
+  to inspect detail) into `C:\Users\ioman\Documents\Photo Edit\exports`. Antho does not want
   comparison sheets or per-round files unless asked. Never overwrite files.
 
 ## Antho's taste

@@ -6,7 +6,7 @@ Everything a new Claude session needs to edit Antho's photos in Lightroom Classi
 
 ```
 Claude Code (on Antho's Windows PC)
-  └─ MCP server "lightroom" (Python, stdio)          C:\Users\ioman\Downloads\lightroom-mcp
+  └─ MCP server "lightroom" (Python, stdio)          C:\Users\ioman\Documents\Photo Edit\lightroom-mcp
        └─ TCP on localhost (127.0.0.1, dynamic ports in C:\tmp\lightroom_ports.txt)
             └─ Lightroom plugin "Lightroom Python Bridge" (Lua)
                  └─ Lightroom Classic (catalog on OneDrive, photos on E:\Photography)
@@ -16,7 +16,7 @@ Claude Code (on Antho's Windows PC)
   on this PC** (desktop app or Remote Control). A claude.ai chat project on its own cannot
   reach Lightroom; it can plan, review exports and hand work to a session on the PC.
 - Code: fork **github.com/AnthonyLeGourrierec/lightroom_mcp** (branch `main`), upstream
-  noopz/lightroom_mcp. Local clone: `C:\Users\ioman\Downloads\lightroom-mcp` (venv inside).
+  noopz/lightroom_mcp. Local clone: `C:\Users\ioman\Documents\Photo Edit\lightroom-mcp` (venv inside).
 
 ## 2. Setup (already done on this PC)
 
@@ -24,9 +24,9 @@ Claude Code (on Antho's Windows PC)
   ```json
   "lightroom": {
     "type": "stdio",
-    "command": "C:\\Users\\ioman\\Downloads\\lightroom-mcp\\venv\\Scripts\\python.exe",
-    "args": ["C:\\Users\\ioman\\Downloads\\lightroom-mcp\\mcp_server\\main.py"],
-    "env": {"PYTHONPATH": "C:\\Users\\ioman\\Downloads\\lightroom-mcp"}
+    "command": "C:\\Users\\ioman\\Documents\\Photo Edit\\lightroom-mcp\\venv\\Scripts\\python.exe",
+    "args": ["C:\\Users\\ioman\\Documents\\Photo Edit\\lightroom-mcp\\mcp_server\\main.py"],
+    "env": {"PYTHONPATH": "C:\\Users\\ioman\\Documents\\Photo Edit\\lightroom-mcp"}
   }
   ```
   Tools appear as `mcp__lightroom__*` in any new Claude Code session on this PC.
@@ -38,7 +38,7 @@ Claude Code (on Antho's Windows PC)
   load it before editing.
 - **Catalog**: `C:\Users\ioman\OneDrive\Images\Lightroom\Lightroom Catalog.lrcat`
   (~8,100 photos). Backup from 2026-10-11 in `C:\Users\ioman\Downloads\lightroom-catalog-backup-2026-10-11`.
-- **Exports** go to `C:\Users\ioman\Downloads\lightroom-demo`.
+- **Exports** go to `C:\Users\ioman\Documents\Photo Edit\exports`.
 
 ## 3. Updating the plugin
 
