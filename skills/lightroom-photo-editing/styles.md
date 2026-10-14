@@ -132,6 +132,14 @@ See the Infrared section of SKILL.md: those recipes depend on Antho's custom pro
 
 ---
 
+## Visual reference
+`C:\Users\ioman\Documents\Photo Edit\style-gallery\style_gallery_IMG_9791.jpg` shows styles 1-11 (and
+Antho's funfair B+C mix) on one daylight portrait; the virtual copy "Claude style gallery" of
+IMG_9791 holds them as snapshots "Gallery 00..11" to click through. Lessons from it:
+- HueAdjustmentBlue toward teal (-15..-20) turns a DAYLIGHT blue sky cyan (teal & orange, CCD,
+  B+C mix). On daylight scenes mask the sky out or leave Blue hue at 0; the shift suits night/city.
+- Golden glow's negative Dehaze/Clarity also fades a clear blue sky; keep it for backlit/low sun.
+
 ## Choosing styles to show in a lesson
 Pick 2-3 that genuinely differ AND suit the photo: for a portrait in soft light, Warm film vs Light
 and airy vs Documentary B&W; for a landscape, Vibrant landscape vs Moody vs Golden glow; for a
