@@ -419,8 +419,11 @@ local function stopSocketServer()
         pcall(function()
             commandRouter:sendEvent("server.shutdown", { reason = "Lightroom closing" })
         end)
-        -- Give Python client 500ms to disconnect gracefully
-        LrTasks.sleep(0.5)
+        -- Give Python client 500ms to disconnect gracefully. Sleeping is only
+        -- allowed inside a task; the Stop menu item calls this outside one.
+        if LrTasks.canYield() then
+            LrTasks.sleep(0.5)
+        end
     end
 
     -- Reset socket state
