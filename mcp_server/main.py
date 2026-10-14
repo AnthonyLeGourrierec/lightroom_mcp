@@ -4,6 +4,7 @@ Main Lightroom MCP Server
 Composes all module servers into a unified interface
 """
 import logging
+import os
 import sys
 from typing import Dict, Any
 from fastmcp import FastMCP
@@ -27,11 +28,19 @@ from mcp_server.servers.catalog import catalog_server
 from mcp_server.servers.develop import develop_server  # Now imports from modular package
 from mcp_server.servers.preview import preview_server
 
-# Mount all servers
-main_server.mount(system_server.server)
-main_server.mount(catalog_server.server)
-main_server.mount(develop_server.server)
-main_server.mount(preview_server.server)
+from mcp_server.servers.compact import compact_server, register_legacy_servers
+
+# Which tools to expose: "compact" (default, ~20 broad tools), "legacy" (the original
+# one-tool-per-slider set) or "all". The compact tools wrap the legacy implementations.
+TOOLSET = os.environ.get("LIGHTROOM_MCP_TOOLS", "compact").lower()
+LEGACY_SERVERS = [system_server.server, catalog_server.server, develop_server.server, preview_server.server]
+register_legacy_servers(*LEGACY_SERVERS)
+
+if TOOLSET in ("compact", "all"):
+    main_server.mount(compact_server)
+if TOOLSET in ("legacy", "all"):
+    for legacy_server in LEGACY_SERVERS:
+        main_server.mount(legacy_server)
 
 # Note: FastMCP doesn't have startup/shutdown decorators in current API
 # Connection management is handled by the client_manager when tools are called
@@ -40,11 +49,11 @@ async def initialize_connection():
     logger.info("Starting Lightroom Classic Bridge MCP Server")
     await resilient_client_manager.connect()
 
-# Set up error handling - FastMCP doesn't support exception_handler decorator in current version
-# error_handler.setup_error_handlers(main_server)
+# Guide tools describing the legacy tool set: only exposed with it
+legacy_only_tool = main_server.tool if TOOLSET in ("legacy", "all") else (lambda fn: fn)
 
 # Add server-level tool for listing capabilities
-@main_server.tool
+@legacy_only_tool
 async def list_capabilities() -> Dict[str, Any]:
     """
     List all available tool categories and capabilities.
@@ -91,7 +100,7 @@ async def list_capabilities() -> Dict[str, Any]:
 # Set up error handling - FastMCP doesn't support exception_handler decorator in current version
 # error_handler.setup_error_handlers(main_server)
 
-@main_server.tool
+@legacy_only_tool
 async def get_quick_start_guide() -> Dict[str, Any]:
     """
     Get a quick start guide for AI photo editing.

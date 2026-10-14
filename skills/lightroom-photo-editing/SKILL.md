@@ -9,57 +9,67 @@ Lightroom Classic runs on this Windows PC with the "Lightroom Python Bridge" plu
 (repo: `C:\Users\ioman\Documents\Photo Edit\lightroom-mcp`, fork github.com/AnthonyLeGourrierec/lightroom_mcp).
 The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools appear in new sessions.
 
+## Tools (compact set, 20 tools)
+- Look: `status`, `find_photos` (whole catalog), `get_photo` (info, develop settings, masks,
+  geometry, enhance, snapshots in one call), `export_jpeg` (render + tonal stats, optional 100% crops).
+- Edit: `set_develop` (any global sliders in one call, auto tone/WB, "default" resets),
+  `set_tone_curve`, `set_color_grading`, `set_geometry` (crop, straighten, Upright, transform),
+  `add_mask` / `remove_mask`, `set_enhance` (AI Denoise), `reset_develop`.
+- Safety and versions: `create_snapshot`, `create_virtual_copy`, `presets`, `copy_settings`,
+  `list_profiles`, `set_metadata`, `select_photo`, `compare_images`.
+- The old one-tool-per-slider set still exists: set env `LIGHTROOM_MCP_TOOLS=legacy` (or `all`)
+  on the server entry in `~/.claude.json` if a compact tool misbehaves.
+
 ## Before starting
-- The bridge auto-starts ~5 s after Lightroom opens (it only listens on localhost). If tools
-  report "not connected", ask Antho to use File > Plug-in Extras > Start Python Bridge.
+- The bridge auto-starts ~5 s after Lightroom opens and the server reconnects by itself after a
+  Lightroom or bridge restart. If tools say Lightroom isn't reachable, ask Antho to open
+  Lightroom or use File > Plug-in Extras > Start Python Bridge.
 - If the MCP tools are not loaded in this session, drive the bridge with the SDK client:
   `venv\Scripts\python` + `from lightroom_sdk.client import LightroomClient` and
-  `await client.execute_command("develop.applySettings", {...})`. Put several steps in one
-  connection: after each disconnect the plugin needs ~2 s to accept a new client.
+  `await client.execute_command("develop.applySettings", {...})`. The bridge accepts one
+  client at a time, so this fails while a session's MCP server is connected.
 - PowerShell strips quotes from JSON passed as native arguments: pass JSON through a file.
 - Plugin (Lua) changes only load after a Lightroom restart. Copy the changed `.lua` files to
   `%APPDATA%\Adobe\Lightroom\Modules\lightroom-python-bridge.lrdevplugin\`, then ask Antho
-  to restart once for a batch of changes. Python-side changes need no restart.
+  to restart once for a batch of changes. Python-side changes need a Claude restart.
 
 ## Ground rules
 - One photo at a time. No bulk edits, never move/rename/delete originals (photos live on E:\).
-- First step on any photo: `develop_create_snapshot(photo_id, "Original (before Claude)")`.
+- First step on any photo: `create_snapshot(photo_id, "Original (before Claude)")`.
   End with a named snapshot of the final. Snapshots are how Antho compares and reverts.
-- Develop-controller tools (AI masks, Denoise, Upright, curve points, setValue) act on the
-  photo currently open in Develop. Check `catalog_get_selected_photos` first; don't switch the
-  photo Antho is looking at without saying so.
-- Export only the final (`preview_export_jpeg`, or `preview_export_with_crops` when you need
-  to inspect detail) into `C:\Users\ioman\Documents\Photo Edit\exports`. Antho does not want
-  comparison sheets or per-round files unless asked. Never overwrite files.
+- Most edits act on the photo open in Develop (= the single selected photo): `set_develop`,
+  AI masks, Denoise, Upright, `reset_develop` refuse any other photo. Check `status` first and
+  use `select_photo` only after saying you're switching the photo Antho is looking at.
+- Export only the final (`export_jpeg`, with `crops` when you need to inspect detail) into
+  `C:\Users\ioman\Documents\Photo Edit\exports`. Antho does not want comparison sheets or
+  per-round files unless asked. Never overwrite files (the tool adds a suffix).
 
 ## Antho's taste
 - Keep it genuine: AI Denoise moderate (about 20-30, not 50+), leave some natural grain;
-  add a touch of fine grain (amount ~10-15, size ~20) after denoising if it looks plastic.
+  add a touch of fine grain (GrainAmount ~10-15, GrainSize ~20) after denoising if it looks plastic.
 - Respect the mood of the scene: evenings and nights stay dark and "nightlike"; don't lift
   exposure to daylight levels. Brighten the subject locally rather than the whole frame.
 - Professional, clean, natural colour: warm light vs blue hour contrast is good, neon or
   over-saturated skies are not. Use the tone curve (gentle S-curve) and masks.
 
 ## Workflow
-1. Inspect: `catalog_get_photo_metadata` (ISO, lens, time), `develop_get_geometry`
-   (orientation, size), `develop_get_masks`, and export a view to look at. Measure the
-   histogram (percentiles, clipping) instead of guessing.
-2. Global: white balance, exposure, highlights/shadows/whites/blacks, presence, HSL,
-   colour grading (`develop_set_color_grading`), S-curve, lens profile + CA.
-3. Detail: `develop_set_enhance("denoise", True, 25)` for high ISO, then set the slider
-   luminance NR to 0; sharpening ~40-50 with edge masking ~50.
-4. Geometry: `develop_set_upright` (needs the photo open in Develop), `develop_set_crop`
-   only if it genuinely improves composition.
-5. Local: AI masks FIRST (`develop_create_ai_mask("sky", ...)`, "subject", ...), THEN
-   gradients/radials/brushes (`develop_add_linear_gradient`, `develop_add_radial_gradient`,
-   `develop_add_brush_stroke`). Verify with `develop_get_masks`.
+1. Inspect: `get_photo(id, include=["info", "develop", "geometry", "masks"])`, then
+   `export_jpeg` to look at it; read its stats (percentiles, clipping) instead of guessing.
+2. Global: one `set_develop` call with white balance, Exposure, Highlights/Shadows/Whites/Blacks,
+   presence, HSL; `set_color_grading`; `set_tone_curve(s_curve=30)`; LensProfileEnable + AutoLateralCA.
+3. Detail: `set_enhance("denoise", True, 25)` for high ISO, then `set_develop` LuminanceSmoothing 0;
+   Sharpness ~40-50 with SharpenEdgeMasking ~50.
+4. Geometry: `set_geometry(upright="auto")` (photo open in Develop), crop only if it genuinely
+   improves composition (`crop={"aspect": "4:5"}` or a rectangle); `angle` to straighten.
+5. Local: AI masks FIRST (`add_mask(id, "sky", {...})`, "subject", ...), THEN linear/radial/brush
+   masks. Verify with `get_photo(include=["masks"])`.
 6. Export, look (also at 100% crops for noise, halos, edges), refine, repeat.
 7. Snapshot the final, export the final only, explain the edit in plain words.
 
 ## Infrared (Antho shoots IR: converted Canon PowerShot ELPH 180, DNG, ~590-720 nm)
 - Edit virtual copies, never the master; one virtual copy per look so they compare side by side.
 - FIRST, before touching anything:
-  1. `develop_list_profiles(filter="infrared")`. Antho has custom IR profiles: camera profiles
+  1. `list_profiles(filter="infrared")`. Antho has custom IR profiles: camera profiles
      "Infrared Temp -10 ... -100" (elph180_ir_temp_*.dcp) and Look profiles
      "Infrared Temp(s) -XX rb swap" (red/blue channel swap), "Infrared -50/-100 Color Swap",
      "RG_Swap", "RB_70%", "Kolari Pocket 590nm IR Channel Mixer".
@@ -75,12 +85,12 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
      - Choose the look (classic, Aerochrome, Goldie, B&W) and refine from there.
   3. How to put a profile on a photo: it can't be set by name through the SDK.
      - Copy it from any photo that already uses it:
-       `develop_copy_settings(source, target, ["CameraProfile", "CameraProfileDigest", "Look"])`.
-       Find one with `catalog_query_photos(camera="ELPH 180", folder="Infrared")` +
-       `develop_get_raw_settings(id, ["Look"])`.
+       `copy_settings(source, target, ["CameraProfile", "CameraProfileDigest", "Look"])`.
+       Find one with `find_photos(camera="ELPH 180", folder="Infrared")` +
+       `get_photo(id, include=["develop"], develop_keys=["Look", "CameraProfile"])`.
      - Or ask Antho to pick it once in Develop > Profile, then continue.
-  4. Optional: if other IR photos in the same folder are already edited, read their raw
-     settings (`develop_get_raw_settings`) to match Antho's style for that series.
+  4. Optional: if other IR photos in the same folder are already edited, read their settings
+     (`get_photo(include=["develop"])`) to match Antho's style for that series.
 - On the swap profile, WHITE BALANCE IS THE MAIN LOOK KNOB, before any HSL:
   ~10500 K -> peach/gold foliage, navy sky; 50000 K (max) -> icy white foliage, cyan-teal
   sky (classic false colour, Antho's CRW_0510 choice). Try both ends first, then refine.
@@ -88,7 +98,7 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
   (keeps texture in white foliage), Shadows -58, Whites +36, Blacks -23, Clarity +14,
   Dehaze +6, cool colour grading (midtone hue 213 sat 30, split toning shadows 209/20,
   highlights 223), straighten -1.97 deg, crop.
-- Always check the horizon / verticals and straighten (CropAngle, develop_set_crop angle);
+- Always check the horizon / verticals and straighten (`set_geometry(angle=...)`);
   wide IR compact shots are often tilted.
 - With an rb swap profile the colour controls are inverted: local/global Temperature UP makes
   the sky bluer (down makes it dark/brown). Aerochrome on Antho's profile: WB ~9000 K / tint
@@ -113,21 +123,19 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
 
 ## Gotchas learned the hard way
 - On the photo open in Develop, settings written directly (crop, Upright) can be overwritten
-  by the Develop controller; set them through the controller (the crop/Upright tools do).
+  by the Develop controller; `set_geometry` sets them through the controller for you.
 - Coordinates: tools take displayed coordinates (0..1, x right, y down). Lightroom stores
   mask and crop geometry in sensor orientation; the tools convert using the photo's
   orientation ("AB" none, "BC" 90 CW, "DA" 90 CCW, "CD" 180). Don't bypass this.
-- Local units stored in MaskGroupBasedCorrections: exposure = EV / 4, other sliders = /100.
-  Tools take slider units.
+- Mask values read back from `get_photo(include=["masks"])` are in stored units:
+  exposure = EV / 4, other sliders = /100. `add_mask` takes slider units.
 - AI masks compute for a few seconds. When one finishes, Lightroom commits its own copy of
   the mask list and silently drops corrections added meanwhile. Create AI masks first.
-- `PerspectiveUpright` written as a raw setting is ignored; Upright only works through the
-  Develop controller (the tool does this). Upright and Denoise can be lost if the Develop
-  photo changes before they settle; re-check with `develop_get_geometry` /
-  `develop_get_enhance_state` before the final export.
-- `preview_generate` thumbnails are stale or blank right after an edit; always judge edits
-  from `preview_export_jpeg` (it waits ~1.5 s for the edit to commit).
+- Upright and Denoise can be lost if the Develop photo changes before they settle; re-check
+  with `get_photo(include=["geometry", "enhance"])` before the final export.
+- Judge edits only from `export_jpeg` (it waits ~1.5 s for the edit to commit); Lightroom's
+  cached previews are stale right after an edit.
+- `get_photo` develop settings use stored names (Exposure2012, Clarity2012, ...), while
+  `set_develop` takes slider names (Exposure, Clarity, ...).
 - Presets saved by the plugin are not listed by Lightroom's preset folders; the plugin
-  remembers their uuids (`develop_list_presets` shows them under "Claude (plugin presets)").
-- `catalog_search_photos` only sees the current selection; use `catalog_query_photos` for
-  the whole catalog (date range, folder, rating, flag, label, camera, lens, keyword).
+  remembers their uuids (`presets("list")` shows them under "Claude (plugin presets)").
