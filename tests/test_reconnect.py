@@ -66,6 +66,7 @@ class FakeBridge:
 def port_file(tmp_path, monkeypatch):
     path = tmp_path / "lightroom_ports.txt"
     monkeypatch.setattr(socket_bridge, "DEFAULT_PORT_FILE", str(path))
+    monkeypatch.setenv("LIGHTROOM_MCP_RELAY", "0")  # these tests talk to the plugin directly
     return path
 
 

@@ -72,6 +72,8 @@ ERROR_CODE_MAP = {
     "INVALID_PARAM_TYPE": ParameterError,
     "HANDLER_ERROR": HandlerError,
     "CONNECTION_FAILED": ConnectionError,
+    "CONNECTION_LOST": ConnectionError,
+    "LIGHTROOM_UNREACHABLE": ConnectionError,
     "CATALOG_ACCESS_FAILED": CatalogAccessError,
     "WRITE_ACCESS_BLOCKED": WriteAccessBlockedError,
     "RESOURCE_UNAVAILABLE": ResourceUnavailableError,

@@ -184,7 +184,8 @@ class SocketBridge:
         request = {
             'id': request_id,
             'command': command,
-            'params': params or {}
+            'params': params or {},
+            **self._request_extras(timeout)
         }
 
         # Create future for response
@@ -205,7 +206,8 @@ class SocketBridge:
                 raise error from e
 
             # Wait for response
-            response = await asyncio.wait_for(future, timeout=timeout)
+            response = await asyncio.wait_for(future, timeout=self._wait_timeout(timeout))
+            self._check_response(response)
             return response
 
         except asyncio.TimeoutError:
@@ -215,6 +217,16 @@ class SocketBridge:
         except Exception as e:
             self._pending_requests.pop(request_id, None)
             raise
+
+    # Hooks for RelayBridge
+    def _request_extras(self, timeout: float) -> Dict[str, Any]:
+        return {}
+
+    def _wait_timeout(self, timeout: float) -> float:
+        return timeout
+
+    def _check_response(self, response: Dict[str, Any]) -> None:
+        pass
 
     async def disconnect(self) -> None:
         """Close connections gracefully"""

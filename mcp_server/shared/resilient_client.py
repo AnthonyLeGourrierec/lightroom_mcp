@@ -7,7 +7,7 @@ bridge is restarted: the next call simply reconnects.
 """
 import logging
 import sys
-from typing import Optional, Dict, Any
+from typing import Callable, Optional, Dict, Any
 from lightroom_sdk import LightroomClient
 from lightroom_sdk.exceptions import ConnectionError as LRConnectionError
 import asyncio
@@ -33,7 +33,8 @@ NOT_REACHABLE_MESSAGE = (
 class ResilientClientManager:
     """Manages the shared Lightroom client with automatic reconnection"""
 
-    def __init__(self):
+    def __init__(self, client_factory: Optional[Callable[[], LightroomClient]] = None):
+        self._client_factory = client_factory or LightroomClient
         self._client: Optional[LightroomClient] = None
         self._reconnect_lock = asyncio.Lock()
 
@@ -48,13 +49,15 @@ class ResilientClientManager:
                 await self._discard(self._client)
                 self._client = None
 
-            client = LightroomClient()
+            client = self._client_factory()
             try:
                 await client.connect(retry_attempts=CONNECT_ATTEMPTS)
             except Exception as e:
                 logger.warning(f"Could not connect to Lightroom: {e}")
                 await self._discard(client)
-                raise LRConnectionError(NOT_REACHABLE_MESSAGE, code="CONNECTION_FAILED") from e
+                if isinstance(e, LRConnectionError) and e.code == "LIGHTROOM_UNREACHABLE":
+                    raise
+                raise LRConnectionError(NOT_REACHABLE_MESSAGE, code="LIGHTROOM_UNREACHABLE") from e
 
             self._client = client
             return client
@@ -75,11 +78,13 @@ class ResilientClientManager:
         try:
             return await client.execute_command(command, params, timeout)
         except LRConnectionError as e:
+            if e.code in ("LIGHTROOM_UNREACHABLE", "CONNECTION_LOST"):
+                raise  # already explained (e.g. reported by the relay)
             if getattr(e, "sent", True):
                 raise LRConnectionError(
                     f"Lost the connection to Lightroom while running '{command}'. "
                     "It may or may not have been applied; check the photo before retrying.",
-                    code="CONNECTION_FAILED"
+                    code="CONNECTION_LOST"
                 ) from e
             logger.info(f"Connection dropped before '{command}' was sent - reconnecting")
 

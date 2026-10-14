@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
@@ -13,9 +14,17 @@ logger = logging.getLogger(__name__)
 class LightroomClient:
     """Main client for interacting with Lightroom"""
 
-    def __init__(self, host: str = '127.0.0.1'):
+    def __init__(self, host: str = '127.0.0.1', direct: Optional[bool] = None):
         self.host = host
-        self._bridge = SocketBridge(host)
+        # By default go through the shared relay, so several sessions can use Lightroom at
+        # once (the plugin accepts one client). LIGHTROOM_MCP_RELAY=0 connects directly.
+        if direct is None:
+            direct = os.environ.get('LIGHTROOM_MCP_RELAY', '1') == '0'
+        if direct:
+            self._bridge = SocketBridge(host)
+        else:
+            from .relay_bridge import RelayBridge
+            self._bridge = RelayBridge()
 
     @property
     def is_connected(self) -> bool:

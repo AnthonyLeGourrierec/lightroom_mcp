@@ -24,10 +24,13 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
 - The bridge auto-starts ~5 s after Lightroom opens and the server reconnects by itself after a
   Lightroom or bridge restart. If tools say Lightroom isn't reachable, ask Antho to open
   Lightroom or use File > Plug-in Extras > Start Python Bridge.
-- If the MCP tools are not loaded in this session, drive the bridge with the SDK client:
-  `venv\Scripts\python` + `from lightroom_sdk.client import LightroomClient` and
-  `await client.execute_command("develop.applySettings", {...})`. The bridge accepts one
-  client at a time, so this fails while a session's MCP server is connected.
+- Several sessions can use Lightroom at once: each MCP server talks to a small relay
+  (`mcp_server/relay.py`, port 54399, log `%TEMP%\lightroom_relay.log`) that holds the plugin's
+  single connection. The first server starts it; it exits after 10 idle minutes. Two sessions
+  editing at the same time still share one Develop view: only one should edit at a time.
+- If the MCP tools are not loaded in this session, use the SDK client (it goes through the relay
+  too): `venv\Scripts\python` + `from lightroom_sdk.client import LightroomClient` and
+  `await client.execute_command("develop.applySettings", {...})`.
 - PowerShell strips quotes from JSON passed as native arguments: pass JSON through a file.
 - Plugin (Lua) changes only load after a Lightroom restart. Copy the changed `.lua` files to
   `%APPDATA%\Adobe\Lightroom\Modules\lightroom-python-bridge.lrdevplugin\`, then ask Antho
