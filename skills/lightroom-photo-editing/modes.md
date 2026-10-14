@@ -42,6 +42,12 @@ from the contact sheet, not from per-photo exports, which photos need a mask.
   subject, not the percentage.
 - Never put a call that needs a new virtual copy's ID in the same parallel batch as
   `create_virtual_copy`: wait for the returned ID (the open-photo guard catches it, but it wastes a call).
+- Surveying an album: rendering a preview of every raw costs ~2.4 s each (750 photos = 30 min,
+  a wasted session). Sample instead: preview every 5th-10th photo (or only the picks/rated ones),
+  then render neighbours of interesting frames. Check for existing edits by reading
+  Highlights/Shadows/Whites/Blacks/curve only (CameraProfile and Look are always set).
+- Measure each pick's brightness (p50) from its preview before editing and set Exposure in the
+  first pass: on the Milan/Venice set this removed the fix-up round entirely (9/9 right first time).
 - Batch rhythm that worked: edit + snapshot + 900 px export for each photo without looking, then one
   contact sheet, then fix only the outliers (10 photos, 3 fixes, ~15 min).
 
