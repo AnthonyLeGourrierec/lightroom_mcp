@@ -135,6 +135,18 @@ diverse photos. Read the companion files when relevant:
 - Low ISO: no denoise needed; add grain instead.
 
 ## Gotchas learned the hard way
+- Read the photo's current settings before changing anything (`get_photo(include=["develop"])`,
+  default keys): "never edited" photos can carry edits (import presets, old tries). On IMG_7821
+  Highlights -77 / Whites -100 / Shadows +58 were already there; overwriting them with milder
+  values re-clipped the neon. Adjust from what is there.
+- AI masks used to inherit the last-used local sliders from Lightroom's Masking panel (seen:
+  temperature -60, tint -30, hue -25, saturation +40 turning a face green). `add_mask` now sets
+  every local slider explicitly; if a mask result looks off, read it with `get_photo(include=["masks"])`.
+- Under coloured light (neon, LEDs), white balance and HSL on skin behave unexpectedly; change one
+  thing, export, look. When a result looks wrong, diff the settings against the master
+  (`develop.getRawSettings` on both) instead of guessing.
+- Styles on a photo with strong coloured light look alike at recipe strength; push them further
+  (grading saturation 25-35, stronger curve) so a comparison is worth looking at.
 - On the photo open in Develop, settings written directly (crop, Upright) can be overwritten
   by the Develop controller; `set_geometry` sets them through the controller for you.
 - Coordinates: tools take displayed coordinates (0..1, x right, y down). Lightroom stores

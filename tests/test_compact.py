@@ -163,7 +163,11 @@ async def test_add_mask_routes_by_kind(lr):
     await compact.add_mask("42", "sky", {"exposure": -0.3, "hue": -45})
     await compact.add_mask("42", "radial", {"exposure": 0.2}, area={"left": 0.3, "top": 0.3, "right": 0.7, "bottom": 0.7},
                            name="face")
-    assert lr.legacy_calls[0] == ("develop_create_ai_mask", {"mask_type": "sky", "exposure": -0.3, "hue": -45})
+    name, kwargs = lr.legacy_calls[0]
+    assert name == "develop_create_ai_mask" and kwargs["mask_type"] == "sky"
+    assert kwargs["exposure"] == -0.3 and kwargs["hue"] == -45
+    # Every other slider is reset so leftovers from earlier masks can't leak in
+    assert kwargs["temperature"] == 0 and kwargs["saturation"] == 0 and kwargs["tint"] == 0
     name, kwargs = lr.legacy_calls[1]
     assert name == "develop_add_radial_gradient"
     assert kwargs["name"] == "face" and kwargs["left"] == 0.3 and kwargs["exposure"] == 0.2

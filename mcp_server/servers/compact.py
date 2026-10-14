@@ -489,7 +489,12 @@ async def add_mask(
         raise ValueError(f"Unknown adjustment(s) for {kind}: {', '.join(unknown)}")
     if kind in AI_MASK_TYPES:
         await _require_open(photo_id, "AI masks")
-        return await _via_controller("develop_create_ai_mask", mask_type=kind, **adjustments)
+        # Lightroom gives a new mask the local sliders last used in the Masking panel (seen live:
+        # temperature -60, tint -30, hue -25, saturation +40 left over from an earlier mask), so
+        # every slider is set explicitly, at 0 unless asked otherwise.
+        explicit = {key: 0 for key in sorted(MASK_ADJUSTMENTS | {"hue"})}
+        explicit.update(adjustments)
+        return await _via_controller("develop_create_ai_mask", mask_type=kind, **explicit)
     tools = {"linear": "develop_add_linear_gradient", "radial": "develop_add_radial_gradient",
              "brush": "develop_add_brush_stroke"}
     if kind not in tools:
