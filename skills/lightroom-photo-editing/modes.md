@@ -31,6 +31,19 @@ from the contact sheet, not from per-photo exports, which photos need a mask.
 - Shooting through glass: a radial over the face with Dehaze +15, Exposure +0.25, Clarity +8 cuts
   the reflection haze locally.
 - Strong coloured cast from foreground bokeh: cool WB 4300-4500 K, Highlights -100, Whites -45.
+- Style recipes are relative to a well-exposed photo. Many shots arrive dark (night, forest shade):
+  first bring p50 near the style's target with Exposure, THEN apply the recipe; 3 of 10 first
+  passes were far too dark because the recipe's Exposure was applied to an already-dark file.
+- Cooling the WB of a scene that is already blue (blue hour) kills the reds entirely (mean R 7/255):
+  check mean_rgb, keep WB >= ~5000 K there.
+- B&W without the B&W profile: Saturation -100 plus HSL Luminance per colour works as a B&W mix;
+  watch crushed shadows (keep < 2-3 %).
+- Black-sky subjects (rides, neon at night) legitimately show 50-80 % clipped shadows: judge the
+  subject, not the percentage.
+- Never put a call that needs a new virtual copy's ID in the same parallel batch as
+  `create_virtual_copy`: wait for the returned ID (the open-photo guard catches it, but it wastes a call).
+- Batch rhythm that worked: edit + snapshot + 900 px export for each photo without looking, then one
+  contact sheet, then fix only the outliers (10 photos, 3 fixes, ~15 min).
 
 ## Lesson mode
 Goal: Antho sees what each step does and learns the vocabulary.
