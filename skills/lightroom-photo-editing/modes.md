@@ -5,6 +5,23 @@ so the expertise lives in this skill (styles.md, techniques.md) and the checks a
 Pick the mode from the request: "teach me / show me styles / lesson" -> Lesson; "polish these /
 make them nice / batch" -> Quick polish; "make it look like this photo" -> Reference.
 
+## Curate first, then finish (what Antho expects: "like a professional photographer")
+Antho's feedback (2026-10-14): proposals must feel like real photographers' photos, so the base
+picture matters and not every style fits every photo. A style gallery on a random photo was
+"random ass". So:
+1. Curate: from the album sheet pick only frames with genuine potential (strong light, clear
+   subject, graphic composition, a moment). Skip near-duplicates, record shots, snapshots of facades.
+2. Let the photo choose the look (one look per photo): dark gothic frame -> fine-art B&W; candlelight
+   face -> chiaroscuro; top-down colour -> clean travel; layered frame + canal -> cinematic;
+   leading lines in hard light -> moody.
+3. Finish like a photographer, not a preset: crop for composition (4:5 for portraits, remove
+   distractions at edges: boats, grilles, empty hull), straighten, local light (radial on the
+   subject/light source, gradient to pull a sky down), vignette, then colour.
+4. Judge the crop on an export: `crop={"aspect", "center_x", "center_y"}` centres are in the
+   displayed image; a wrong centre_y cut heads off on IMG_9764. Check heads/hands are whole.
+5. Low-key photos (candle portraits, frames in shadow) legitimately have a median of 10-15: judge
+   the subject's exposure, not p50.
+
 ## Efficient checking (all modes)
 Check what can actually go wrong, once, at the right moment. No ritual re-reads.
 - Trust tool results for plain sliders; they apply reliably. Don't read settings back after them.
