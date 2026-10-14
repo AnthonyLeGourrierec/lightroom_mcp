@@ -32,10 +32,16 @@ class SystemServer(LightroomServerModule):
             Returns:
                 Connection status and response time
             """
-            client = await resilient_client_manager.get_client()
-
             start_time = datetime.now()
-            result = await client.ping()
+            try:
+                client = await resilient_client_manager.get_client()
+                result = await client.ping()
+            except Exception:
+                # Stale connection (e.g. bridge restarted): reconnect once
+                await resilient_client_manager.disconnect()
+                client = await resilient_client_manager.get_client()
+                start_time = datetime.now()
+                result = await client.ping()
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
 
             return {
@@ -75,8 +81,8 @@ class SystemServer(LightroomServerModule):
                 Reconnection status
             """
             # Disconnect and reconnect
-            await client_manager.disconnect()
-            await client_manager.connect()
+            await resilient_client_manager.disconnect()
+            await resilient_client_manager.get_client()
 
             return {
                 "status": "reconnected",
