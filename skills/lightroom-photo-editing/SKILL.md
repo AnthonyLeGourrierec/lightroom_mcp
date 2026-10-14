@@ -137,5 +137,9 @@ The MCP server is registered as `lightroom` in `~/.claude.json`, so its tools ap
   cached previews are stale right after an edit.
 - `get_photo` develop settings use stored names (Exposure2012, Clarity2012, ...), while
   `set_develop` takes slider names (Exposure, Clarity, ...).
+- Colour grading shadow/highlight wheels are stored as SplitToningShadowHue/Saturation and
+  SplitToningHighlightHue/Saturation (`ColorGradeShadowHue` etc. don't exist); `set_color_grading`
+  maps them for you. Edits on the open photo go through the Develop panel; direct writes
+  (masks, snapshots, export) wait ~2.5 s so Lightroom can't revert them.
 - Presets saved by the plugin are not listed by Lightroom's preset folders; the plugin
   remembers their uuids (`presets("list")` shows them under "Claude (plugin presets)").

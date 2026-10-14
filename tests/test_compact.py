@@ -177,3 +177,18 @@ async def test_add_mask_rejects_hue_on_gradients(lr):
 async def test_get_photo_trims_profile_tables_and_empty_values(lr):
     result = await compact.get_photo("42", include=["develop"])
     assert result["develop"] == {"Exposure2012": 0.5, "Look": {"Name": "IR rb swap", "Amount": 2}}
+
+
+async def test_shadow_and_highlight_wheels_use_split_toning_names(lr):
+    await compact.set_color_grading("42", shadow_hue=209, shadow_sat=20, highlight_hue=223, shadow_lum=-5)
+    await compact.set_develop("42", {"ColorGradeHighlightSat": 10})
+    sent = [p["param"] for p in lr.sent("develop.setValue")]
+    assert sent == ["SplitToningShadowHue", "SplitToningShadowSaturation", "ColorGradeShadowLum",
+                    "SplitToningHighlightHue"]
+    assert lr.sent("develop.applySettings")[0]["settings"] == {"SplitToningHighlightSaturation": 10}
+
+
+async def test_shadow_hue_on_a_photo_that_is_not_open_is_refused(lr):
+    lr.selected = ["7"]
+    with pytest.raises(ValueError, match="open"):
+        await compact.set_color_grading("42", shadow_hue=209)

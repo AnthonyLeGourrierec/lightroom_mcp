@@ -109,9 +109,8 @@ async def _require_open(photo_id: str, what: str) -> None:
 PER_PHOTO_KEYS = {
     "PerspectiveVertical", "PerspectiveHorizontal", "PerspectiveRotate", "PerspectiveScale",
     "PerspectiveAspect", "PerspectiveX", "PerspectiveY", "AutoLateralCA", "LensProfileEnable",
-    "ColorGradeShadowHue", "ColorGradeShadowSat", "ColorGradeShadowLum",
-    "ColorGradeMidtoneHue", "ColorGradeMidtoneSat", "ColorGradeMidtoneLum",
-    "ColorGradeHighlightHue", "ColorGradeHighlightSat", "ColorGradeHighlightLum",
+    "ColorGradeShadowLum", "ColorGradeMidtoneHue", "ColorGradeMidtoneSat", "ColorGradeMidtoneLum",
+    "ColorGradeHighlightLum",
     "ColorGradeGlobalHue", "ColorGradeGlobalSat", "ColorGradeGlobalLum",
     "ColorGradeBlending", "SplitToningBalance",
 }
@@ -140,6 +139,13 @@ CONTROLLER_KEYS = {
     "DefringePurpleAmount", "DefringeGreenAmount", "CurveRefineSaturation",
     "LensBlurActive", "LensBlurAmount", "LensBlurCatEye", "LensBlurHighlightsBoost", "LensBlurFocalRange",
     *_HSL, *_GRAY,
+}
+
+# The colour grading shadow/highlight wheels are stored under the old split toning names:
+# "ColorGradeShadowHue" etc. do not exist and Lightroom silently ignores them.
+COLOR_GRADE_ALIASES = {
+    "ColorGradeShadowHue": "SplitToningShadowHue", "ColorGradeShadowSat": "SplitToningShadowSaturation",
+    "ColorGradeHighlightHue": "SplitToningHighlightHue", "ColorGradeHighlightSat": "SplitToningHighlightSaturation",
 }
 
 # Lightroom applies these one by one (bulk-applying them together is unreliable)
@@ -289,7 +295,7 @@ async def set_develop(
     The photo must be the one open in Develop (use select_photo). Crop, Upright and transform:
     use set_geometry; tone curve points: set_tone_curve; colour wheels: set_color_grading.
     """
-    settings = dict(settings or {})
+    settings = {COLOR_GRADE_ALIASES.get(k, k): v for k, v in (settings or {}).items()}
     photo_id = str(photo_id)
     await _require_open(photo_id, "set_develop")
 
@@ -384,10 +390,13 @@ async def set_color_grading(
         for name, value in values.items():
             if value is not None:
                 key = keys.get(name) or "ColorGrade" + "".join(part.capitalize() for part in name.split("_"))
-                settings[key] = value
+                settings[COLOR_GRADE_ALIASES.get(key, key)] = value
         for key, value in settings.items():
             await _cmd("develop.setValue", {"param": key, "value": value, "photoId": photo_id})
         return {"success": True, "applied": settings, "via": "develop controller"}
+    if any(values[k] is not None for k in ("shadow_hue", "shadow_sat", "highlight_hue", "highlight_sat")):
+        # Those are split toning settings, which the direct-write path does not accept
+        raise ValueError(f"Shadow/highlight hue and saturation need the photo open: select_photo({photo_id}) first")
     return await _direct("develop_set_color_grading", photo_id=photo_id, **values)
 
 
