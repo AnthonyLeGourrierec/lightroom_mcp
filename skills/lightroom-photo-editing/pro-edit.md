@@ -21,8 +21,11 @@ area. That area must be the subject. Lift the subject, darken the competition, s
 it failed: dial the strongest move back 20-30 %.
 
 ## Lessons from Antho's own edits (2026-10-15, read before every edit)
-- If Antho has edited the photo before (master or another copy), export that version FIRST and
-  study it: it is the target taste. Improve execution, do not change the direction.
+- If Antho has edited the photo before, look at it as a reference, not ground truth; ask which file
+  is Antho's real final (masters, copies, TIF/DNG side files can be old tries) before comparing.
+- The inspector must catch a wrong direction on its own: compare the render with the untouched
+  photo and ask 'does this still feel like the scene?' (e.g. a concert that lost its stage light
+  and glow is wrong even if the subject 'wins' the attention numbers). Numbers never override the eye.
 - Atmosphere (stage glow, golden light, haze) is part of the subject. Only darken what is a
   distraction, never the mood. Check the intent sentence: "concert" means glow and saturation.
 - Deep, rich, saturated hero colours; never desaturate the photo's main colour to "tame" it.
