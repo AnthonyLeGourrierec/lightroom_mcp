@@ -34,6 +34,16 @@ it failed: dial the strongest move back 20-30 %.
 - Watch for magenta/pink drift (mean R high with B > G); fix with HSL/tint before finishing.
 - The title/story decides the crop ("the adventurer" = small subject in a big world).
 
+- Antho wants artistic vision, not correction: for any photo worth a finished edit, propose 2-3
+  distinct, committed directions on separate copies (e.g. low-key spotlight noir; complementary
+  colour separation such as warm subject on a background shifted to teal with an AI background
+  mask, local hue +180 / temperature -80; a film emulation such as CineStill 800T with tungsten WB,
+  lifted blacks, grain and a halation radial) instead of one safe "corrected" version.
+- Local hue: range -180..+180; from red/orange, NEGATIVE goes to magenta (Antho dislikes), +180
+  reaches teal/cyan.
+- Mask coordinates are fractions of the WHOLE uncropped photo, not of the crop. Place masks from
+  an uncropped render, or convert from the crop rectangle returned by set_geometry.
+
 ## 0. Look and reset
 Reset the virtual copy (Antho may have edited it), restore an IR profile if needed
 (`copy_settings`), render it, and study the render, its histogram numbers and its noise at 100 %.
