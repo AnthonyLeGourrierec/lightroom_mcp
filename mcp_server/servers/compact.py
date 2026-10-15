@@ -546,7 +546,14 @@ async def reset_develop(photo_id: str, parameters: Optional[List[str]] = None) -
     await _require_open(photo_id, "reset_develop")
     if not parameters:
         await _cmd("develop.resetAllDevelopAdjustments")
-        return {"reset": "all"}
+        # Lightroom's reset leaves masks in place (seen live: a virtual copy kept 5 masks from
+        # Antho's own edit), so remove them too: "reset" must mean a clean slate.
+        removed = []
+        for name in await _mask_names(photo_id):
+            if name:
+                await _direct("develop_remove_mask", photo_id=photo_id, name=name)
+                removed.append(name)
+        return {"reset": "all", "masks_removed": removed}
     for parameter in parameters:
         await _cmd("develop.resetToDefault", {"param": parameter, "photoId": photo_id})
     return {"reset": parameters}
