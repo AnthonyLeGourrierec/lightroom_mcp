@@ -22,6 +22,19 @@ picture matters and not every style fits every photo. A style gallery on a rando
 5. Low-key photos (candle portraits, frames in shadow) legitimately have a median of 10-15: judge
    the subject's exposure, not p50.
 
+## Portfolio edit notes (2026-10-15, 5 IR + 5 Venice night)
+- Antho asked: reset each virtual copy before editing (it may carry Antho's own edits). After
+  `reset_develop`, IR copies lose the custom profile and Look; restore them with
+  `copy_settings(master, copy, ["CameraProfile", "CameraProfileDigest", "Look"])`, then set WB.
+  Embedded-profile IR DNGs keep their as-shot WB (50000 K) after reset and are already a usable base.
+- Photos inside a collapsed stack (stackPosition > 1) can't be selected: `select_photo` reports
+  success but nothing changes, and `create_virtual_copy` fails with "attempt to index a boolean
+  value". Pick the stack top (stackPosition 1) or ask Antho to expand the stack.
+- Night recipes: blue hour keeps WB >= ~4300-5300 K or the lamps lose their warmth (mean R < 20 is
+  the warning sign); high-ISO (>= 2500) gets Denoise 22-30 first; Upright "vertical" for canals.
+- IR sky: an AI sky mask with temperature -30..-40, saturation +20..30, dehaze +10..15 turns a
+  washed-out IR sky blue on the embedded profile; IR DNGs need ~2.5 % crop for the black border.
+
 ## Efficient checking (all modes)
 Check what can actually go wrong, once, at the right moment. No ritual re-reads.
 - Trust tool results for plain sliders; they apply reliably. Don't read settings back after them.
