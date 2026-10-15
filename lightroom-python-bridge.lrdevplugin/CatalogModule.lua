@@ -435,6 +435,16 @@ function CatalogModule.setSelectedPhotos(params, callback)
         end, { timeout = 10 })  -- 10 second timeout
     end)
     
+    -- A single photo outside the current Library view is silently not selected: show its folder
+    if writeSuccess and #photoIds == 1 then
+        local photo = catalog:getPhotoByLocalId(tonumber(photoIds[1]))
+        local DevelopModule = _G.LightroomPythonBridge and _G.LightroomPythonBridge.DevelopModule
+        if photo and catalog:getTargetPhoto() ~= photo and DevelopModule and DevelopModule.selectVisible then
+            local shown = DevelopModule.selectVisible(photo)
+            if selectionResult then selectionResult.shownFolder = true; selectionResult.selectedNow = shown end
+        end
+    end
+
     if writeSuccess then
         logger:info("Successfully set selection to " .. tostring(selectionResult and selectionResult.selected) .. " photos")
         callback({

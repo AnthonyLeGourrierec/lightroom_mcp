@@ -3884,6 +3884,25 @@ function DevelopModule.listSnapshots(params, callback)
     end
 end
 
+-- Select one photo even when it is not in the current Library view. Lightroom silently ignores
+-- setSelectedPhotos for photos outside the active source (another folder, a filtered view), so
+-- if the selection did not take, switch the active source to the photo's folder and retry.
+-- Returns true when the photo ended up as the active photo (false: e.g. hidden in a collapsed stack).
+function DevelopModule.selectVisible(photo)
+    local catalog = LrApplication.activeCatalog()
+    catalog:setSelectedPhotos(photo, { photo })
+    if catalog:getTargetPhoto() == photo then return true end
+    local LrPathUtils = import 'LrPathUtils'
+    local folder = catalog:getFolderByPath(LrPathUtils.parent(photo:getRawMetadata("path")))
+    if folder then
+        catalog:setActiveSources({ folder })
+        LrTasks.sleep(0.5)
+        catalog:setSelectedPhotos(photo, { photo })
+        LrTasks.sleep(0.2)
+    end
+    return catalog:getTargetPhoto() == photo
+end
+
 -- Virtual copy of one photo (selects it first, as Lightroom copies the selection)
 function DevelopModule.createVirtualCopy(params, callback)
     ensureLrModules()
@@ -3892,7 +3911,11 @@ function DevelopModule.createVirtualCopy(params, callback)
     if not photo then return end
     local ok, err = LrTasks.pcall(function()
         local catalog = LrApplication.activeCatalog()
-        catalog:setSelectedPhotos(photo, { photo })
+        if not DevelopModule.selectVisible(photo) then
+            callback({ error = { code = "NOT_SELECTABLE", message =
+                "Lightroom would not select this photo, even in its own folder: it is probably hidden in a collapsed stack. Ask Antho to expand the stack (Photo > Stacking > Expand All Stacks)." } })
+            return
+        end
         local copies
         catalog:withWriteAccessDo("Create virtual copy", function()
             copies = catalog:createVirtualCopies(params.name or "Claude")
