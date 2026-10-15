@@ -14,6 +14,9 @@ diverse photos. Read the companion files when relevant:
 - `modes.md`: Lesson mode, Quick polish (batch), taste log ("my style"), reference photos, and how
   to check efficiently. Read it at the start of any lesson, batch or reference request.
 - `styles.md`: 12 named styles with recipes and target numbers, and which to show for which photo.
+- `pro-edit.md`: THE process for any finished/portfolio edit (brief, eye path, crop, denoise,
+  correction, presence, curve, attention masks, mixer, grade, inspector). Read it first; it follows
+  Antho's own order and uses `tools/lightroom_ai_bridge/` (attention_check, measure_tilt).
 - `techniques.md`: Lightroom Classic tips and tricks, the order of work, and which ones Claude can do
   vs. which Antho does by hand.
 
