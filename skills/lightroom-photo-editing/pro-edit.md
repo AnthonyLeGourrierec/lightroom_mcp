@@ -20,6 +20,17 @@ area. That area must be the subject. Lift the subject, darken the competition, s
 **Quality bar:** a grade is felt before it is seen. If the edit is noticed before the subject,
 it failed: dial the strongest move back 20-30 %.
 
+## Lessons from Antho's own edits (2026-10-15, read before every edit)
+- If Antho has edited the photo before (master or another copy), export that version FIRST and
+  study it: it is the target taste. Improve execution, do not change the direction.
+- Atmosphere (stage glow, golden light, haze) is part of the subject. Only darken what is a
+  distraction, never the mood. Check the intent sentence: "concert" means glow and saturation.
+- Deep, rich, saturated hero colours; never desaturate the photo's main colour to "tame" it.
+- Depth through complementary grading: warm highlights, teal/blue shadows (split toning shadows
+  hue ~185-215, saturation 25-40 is normal for Antho).
+- Watch for magenta/pink drift (mean R high with B > G); fix with HSL/tint before finishing.
+- The title/story decides the crop ("the adventurer" = small subject in a big world).
+
 ## 0. Look and reset
 Reset the virtual copy (Antho may have edited it), restore an IR profile if needed
 (`copy_settings`), render it, and study the render, its histogram numbers and its noise at 100 %.
