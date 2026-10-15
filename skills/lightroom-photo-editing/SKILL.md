@@ -56,9 +56,18 @@ diverse photos. Read the companion files when relevant:
   `C:\Users\ioman\Documents\Photo Edit\exports`. Antho does not want comparison sheets or
   per-round files unless asked. Never overwrite files (the tool adds a suffix).
 
-## Antho's taste
-- Keep it genuine: AI Denoise moderate (about 20-30, not 50+), leave some natural grain;
-  add a touch of fine grain (GrainAmount ~10-15, GrainSize ~20) after denoising if it looks plastic.
+## Antho's taste (full log: `C:\Users\ioman\Documents\Photo Edit\taste-log.md`, read it first)
+- Polish over effect (review of 40 proposals, 2026-10-15): visible grain/noise reads as "not
+  properly edited". On high-ISO shots Denoise enough to look clean (~35-45 at ISO 3200+, judge a
+  100 % crop) and add NO grain; on clean low-ISO shots grain is optional and subtle (<= 8).
+- No black and white unless asked (sole exception liked: gritty neon street portrait 7805).
+- Contrast and colour pop beat matte/airy/washed-out looks on Antho's own photos.
+- Define the subject: separate it from the background with light, using AI subject/people masks
+  (lift + slight clarity) and darkening the surroundings (inverted subject mask or burn), not one
+  small generic radial. Every mask must have a clear purpose Antho could name.
+- Crop for composition every time (rule of thirds, remove edge distractions, keep lines straight);
+  a weak crop is the most common complaint.
+- If an edit doesn't clearly beat the original, don't propose it.
 - Respect the mood of the scene: evenings and nights stay dark and "nightlike"; don't lift
   exposure to daylight levels. Brighten the subject locally rather than the whole frame.
 - Professional, clean, natural colour: warm light vs blue hour contrast is good, neon or
@@ -81,6 +90,10 @@ diverse photos. Read the companion files when relevant:
 
 ## Infrared (Antho shoots IR: converted Canon PowerShot ELPH 180, DNG, ~590-720 nm)
 - Edit virtual copies, never the master; one virtual copy per look so they compare side by side.
+- IR must stay SURREAL and BOLD: strong colour separation (foliage vs sky vs stone), no blue cast,
+  never toned toward realism (Antho rejected a "more realistic" Aerochrome and a blue-cast classic
+  IR, and preferred their own edits). Improve execution only: sharpness, contrast handling,
+  clean noise, composition. A saturated blue sky needs equally strong reds/whites to balance.
 - FIRST, before touching anything:
   1. `list_profiles(filter="infrared")`. Antho has custom IR profiles: camera profiles
      "Infrared Temp -10 ... -100" (elph180_ir_temp_*.dcp) and Look profiles
